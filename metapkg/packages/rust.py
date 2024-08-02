@@ -7,7 +7,7 @@ import pathlib
 import textwrap
 
 from poetry.core.packages import dependency as poetry_dep
-from poetry.core.semver import version as poetry_version
+from poetry.core.constraints import version as poetry_version
 from poetry.core.version import pep440 as poetry_pep440
 
 from metapkg import targets

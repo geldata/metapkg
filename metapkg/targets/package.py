@@ -10,7 +10,7 @@ from poetry.core.packages import package as poetry_pkg
 from . import base
 
 if TYPE_CHECKING:
-    from poetry.core.semver.version import Version
+    from poetry.core.constraints.version import Version
 
 
 class SystemPackage(poetry_pkg.Package):

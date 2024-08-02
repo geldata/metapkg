@@ -5,6 +5,7 @@ import json
 import pathlib
 import sys
 
+from cleo.helpers import argument, option
 from poetry.utils import env as poetry_env
 
 from metapkg import targets
@@ -13,18 +14,41 @@ from . import base
 
 
 class Metadata(base.Command):
-    """Show metadata for a given package and version.
-
-    metadata
-        { name : Package to show metadata for. }
-        { --generic : Build a generic target. }
-        { --libc= : Libc to target. }
-        { --release : Whether this build is a release. }
-        { --source-ref= : Source version to build (VCS ref or tarball version). }
-        { --pkg-revision= : Override package revision number (defaults to 1). }
-    """
-
-    help = """Returns metadata for a given package and version."""
+    name = "metadata"
+    description = """Returns metadata for a given package and version"""
+    arguments = [
+        argument(
+            "name",
+            description="Package to build",
+        ),
+    ]
+    options = [
+        option(
+            "generic",
+            description="Build a generic artifact",
+            flag=True,
+        ),
+        option(
+            "libc",
+            description="Libc to target",
+            flag=False,
+        ),
+        option(
+            "release",
+            description="Whether this build is a release",
+            flag=True,
+        ),
+        option(
+            "source-ref",
+            description="Source version to build (VCS ref or tarball version)",
+            flag=False,
+        ),
+        option(
+            "pkg-revision",
+            description="Override package revision number (defaults to 1)",
+            flag=False,
+        ),
+    ]
 
     _loggers = ["metapkg.metadata"]
 

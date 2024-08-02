@@ -20,10 +20,7 @@ setup(
         "build~=1.2.1",
         "distro~=1.9.0",
         "requests~=2.31.0",
-        "poetry~=1.2.0",
-        # Poetry <1.5.0 is not compatible with setuptools>=70.2.0
-        # See https://github.com/pypa/setuptools/pull/4434
-        "setuptools<70.2.0",
+        "poetry~=1.8.3",
         "distlib~=0.3.8",
         'python-magic~=0.4.26; platform_system=="Linux" or (platform_machine!="x86_64" and platform_machine!="AMD64")',
         'python-magic-bin~=0.4.14; platform_system!="Linux" and platform_machine!="arm64"',
