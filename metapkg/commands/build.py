@@ -306,7 +306,11 @@ class Build(base.Command):
         )
         solver = puzzle.Solver(build_root, repo_pool, [], [], self.io)
         solver._provider = provider
-        resolution = solver._solve()
+        mpkg_base.all_requires_include_build_reqs = True
+        try:
+            resolution = solver._solve()
+        finally:
+            mpkg_base.all_requires_include_build_reqs = False
 
         pkg_map = {}
         graph = {}

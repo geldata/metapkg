@@ -56,6 +56,7 @@ get_build_requirements = repository.get_build_requirements
 set_build_requirements = repository.set_build_requirements
 canonicalize_name = packaging.utils.canonicalize_name
 NormalizedName = packaging.utils.NormalizedName
+all_requires_include_build_reqs: bool = False
 
 
 Args: TypeAlias = dict[str, Union[str, pathlib.Path, None]]
@@ -422,6 +423,15 @@ class BasePackage(poetry_pkg.Package):
 
     def get_package_layout(self, build: targets.Build) -> PackageFileLayout:
         return PackageFileLayout.REGULAR
+
+    @property
+    def all_requires(
+        self,
+    ) -> list[poetry_dep.Dependency]:
+        if all_requires_include_build_reqs:
+            return super().all_requires + get_build_requirements(self)
+        else:
+            return super().all_requires
 
 
 @dataclasses.dataclass(kw_only=True)
