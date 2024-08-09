@@ -11,13 +11,11 @@ import pathlib
 
 import packaging.utils
 
-from poetry.repositories import exceptions as poetry_repo_exc
 from poetry.repositories import repository_pool as poetry_pool
 from poetry.repositories import repository as poetry_repo
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import dependency_group as poetry_depgroup
 from poetry.core.packages import vcs_dependency as poetry_vcsdep
-from poetry.core.constraints import version as poetry_version
 from poetry.packages import dependency_package as poetry_deppkg
 from poetry.core.packages import package as poetry_pkg
 from poetry.mixology import incompatibility as poetry_incompat
@@ -64,36 +62,6 @@ poetry_versolver.DependencyCache._search_for = _DependencyCache_search_for  # ty
 
 class Pool(poetry_pool.RepositoryPool):
     pass
-    # def _package(
-    #     self,
-    #     name: str,
-    #     version: poetry_version.Version,
-    #     extras: list[str] | None = None,
-    #     repository_name: str | None = None,
-    # ) -> poetry_pkg.Package:
-    #     for repo in self.repositories:
-    #         try:
-    #             package = repo.package(name, version, extras=extras)
-    #         except poetry_repo_exc.PackageNotFound:
-    #             continue
-    #         if package:
-    #             self._packages.append(package)
-
-    #             return package
-
-    #     raise poetry_repo_exc.PackageNotFound(
-    #         f"Package {name} ({version}) not found."
-    #     )
-
-    # def find_packages(
-    #     self, dependency: poetry_dep.Dependency
-    # ) -> list[poetry_pkg.Package]:
-    #     for repo in self.repositories:
-    #         packages = repo.find_packages(dependency)
-    #         if packages:
-    #             return packages
-
-    #     return []
 
 
 class BundleRepository(poetry_repo.Repository):
