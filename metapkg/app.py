@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from cleo.io.outputs.output import Output
 
 
-class App(BaseApplication):  # type: ignore
+class App(BaseApplication):
     def __init__(self) -> None:
         super().__init__(metapkg.__name__, metapkg.__version__)
 
@@ -38,4 +38,4 @@ def main() -> int:
         cmd = getattr(metapkg_commands, cmd_name)
         app.add(cmd())
 
-    return app.run()  # type: ignore
+    return app.run()

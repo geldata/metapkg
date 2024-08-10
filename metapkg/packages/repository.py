@@ -77,7 +77,7 @@ class Provider(poetry_provider.Provider):
     def __init__(
         self,
         package: poetry_pkg.Package,
-        pool: poetry_pool.Pool,
+        pool: poetry_pool.RepositoryPool,
         io: cleo_io.IO,
         *,
         installed: list[poetry_pkg.Package] | None = None,
