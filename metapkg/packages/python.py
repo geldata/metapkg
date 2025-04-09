@@ -91,17 +91,14 @@ class PyPiRepository(pypi_repository.PyPiRepository):
         self,
         name: str,
         version: poetry_version.Version,
-        extras: list[str] | None = None,
     ) -> poetry_pkg.Package:
         if name.startswith("pypkg-"):
             name = name[len("pypkg-") :]
 
         try:
-            orig_package = super().package(
-                name=name, version=version, extras=extras
-            )
+            orig_package = super().package(name=name, version=version)
         except ValueError as e:
-            raise poetry_repo_exc.PackageNotFound(
+            raise poetry_repo_exc.PackageNotFoundError(
                 f"Package {name} ({version}) not found."
             ) from e
 
@@ -202,7 +199,7 @@ class PyPiRepository(pypi_repository.PyPiRepository):
             name = name[len("pypkg-") :]
         json_data = self._get(f"pypi/{name}/{version}/json")
         if json_data is None:
-            raise poetry_repo_exc.PackageNotFound(
+            raise poetry_repo_exc.PackageNotFoundError(
                 f"Package {name} ({version}) not found."
             )
         else:
@@ -628,7 +625,7 @@ class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
             name=name,
             pretty_version=pretty_version,
             requires=requires,
-            source_version=cls.resolve_vcs_version(io, repo),
+            source_version=repo.rev_parse("HEAD"),
         )
         package.dist_name = dist.name
         repository.set_build_requirements(

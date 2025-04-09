@@ -327,8 +327,6 @@ class AmazonLinuxTarget(RHEL7OrNewerTarget):
             "-y",
             spec,
             cwd=str(build.get_spec_root(relative_to="fsroot")),
-            stdout=build._io.output.stream,
-            stderr=subprocess.STDOUT,
         )
 
 

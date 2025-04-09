@@ -1,22 +1,19 @@
 from __future__ import annotations
 from typing import (
-    TYPE_CHECKING,
     Any,
 )
 
 import os
 import pathlib
 import subprocess
+from functools import cached_property
 
 from dulwich import repo as dulwich_repo
 
 from poetry.core.vcs import git as core_git
 from poetry.vcs import git as poetry_git
 
-from . import cmd
-
-if TYPE_CHECKING:
-    from dulwich import repo as dulwich_repo
+from .cmd import cmd
 
 
 class Git(core_git.Git):
@@ -28,7 +25,7 @@ class Git(core_git.Git):
     ) -> str:
         if not folder and self._work_dir and self._work_dir.exists():
             folder = self._work_dir
-        result = cmd.cmd("git", *args, cwd=folder, **kwargs)
+        result = cmd("git", *args, cwd=folder, **kwargs)
         result = result.strip(" \n\t")
         return result
 
@@ -37,6 +34,60 @@ class Git(core_git.Git):
         work_tree = self._work_dir
         assert work_tree is not None
         return work_tree
+
+    @cached_property
+    def dulwich_repo(self) -> dulwich_repo.Repo:
+        assert self._work_dir is not None
+        return dulwich_repo.Repo(str(self._work_dir))
+
+    def rev_parse(self, rev: str) -> str:
+        repo = self.dulwich_repo
+        with repo:
+            return repo.get_peeled(rev.encode("utf-8")).decode("utf-8")
+
+    def peel_ref(self, ref: str) -> str:
+        if ref == "HEAD":
+            return self.rev_parse(ref)
+
+        # The name can be a branch or tag, so we attempt to look it up
+        # with ls-remote. If we don't find anything, we assume it's a
+        # commit hash.
+        rev = None
+        output = self.run("ls-remote", "--heads", "--tags", "origin", ref)
+        if output:
+            lines = output.splitlines()
+
+            sha_map: dict[str, str] = {}
+            for line in lines:
+                if not line.strip():
+                    continue
+                sha, name = line.strip().split("\t")
+                sha_map[name] = sha
+
+            # Try peeled tag (refs/tags/<ref>^{})
+            peeled_tag = f"refs/tags/{ref}^{{}}"
+            if peeled_tag in sha_map:
+                rev = sha_map[peeled_tag]
+
+            if rev is None:
+                # Try direct tag (refs/tags/<ref>)
+                tag = f"refs/tags/{ref}"
+                if tag in sha_map:
+                    rev = sha_map[tag]
+
+            if rev is None:
+                # Try branch (refs/heads/<ref>)
+                branch = f"refs/heads/{ref}"
+                if branch in sha_map:
+                    rev = sha_map[branch]
+
+        if rev is None:
+            # The name can be a branch or tag, so we attempt to look it up
+            # with ls-remote. If we don't find anything, we assume it's a
+            # commit hash.
+            rev = ref
+
+        return rev
 
 
 class GitBackend(poetry_git.Git):

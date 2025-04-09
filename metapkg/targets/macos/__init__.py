@@ -322,10 +322,10 @@ class MacOSTarget(generic.GenericTarget):
             signature = f.read(4)
         # Mach-O binaries
         return signature in {
-            b"\xFE\xED\xFA\xCE",
-            b"\xFE\xED\xFA\xCF",
-            b"\xCE\xFA\xED\xFE",
-            b"\xCF\xFA\xED\xFE",
+            b"\xfe\xed\xfa\xce",
+            b"\xfe\xed\xfa\xcf",
+            b"\xce\xfa\xed\xfe",
+            b"\xcf\xfa\xed\xfe",
         }
 
     def is_dynamically_linked(

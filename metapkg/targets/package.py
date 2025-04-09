@@ -5,7 +5,7 @@ from typing import Optional
 from typing import TypeVar
 from typing import Union
 
-from poetry.core.packages import package as poetry_pkg
+from metapkg.packages import base as mpkg_base
 
 from . import base
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from poetry.core.constraints.version import Version
 
 
-class SystemPackage(poetry_pkg.Package):
+class SystemPackage(mpkg_base.PackageWithPrettyVersion):
     def __init__(
         self,
         name: str,

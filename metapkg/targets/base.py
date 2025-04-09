@@ -545,7 +545,7 @@ class LinuxTarget(PosixTarget):
         with open(path, "rb") as f:
             header = f.read(18)
             signature = header[:4]
-            if signature == b"\x7FELF":
+            if signature == b"\x7fELF":
                 byteorder: Literal["big", "little"]
                 if header[5] == 2:
                     byteorder = "big"
@@ -2184,7 +2184,7 @@ class Build:
     ) -> None:
         new_paths = list(paths)
         if not args.get(key) and not ignore_env:
-            new_paths.insert(0, f"${{{key}}}")
+            new_paths.insert(0, f'"${{{key}}}"')
         self.sh_append_quoted_flags(args, key, new_paths, sep=sep)
 
     def sh_append_paths(
@@ -2212,7 +2212,7 @@ class Build:
     ) -> None:
         new_paths = list(paths)
         if not args.get(key) and not ignore_env:
-            new_paths.append(f"${{{key}}}")
+            new_paths.append(f'"${{{key}}}"')
         self.sh_prepend_quoted_flags(args, key, new_paths, sep=sep)
 
     def sh_prepend_paths(

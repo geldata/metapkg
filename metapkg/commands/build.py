@@ -15,6 +15,7 @@ from cleo.helpers import argument, option
 from poetry import puzzle
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import project_package
+from poetry.repositories import repository_pool as poetry_repository_pool
 from poetry.utils import env as poetry_env
 
 from metapkg import targets
@@ -261,11 +262,17 @@ class Build(base.Command):
 
         repo_pool = af_repo.Pool()
         repo_pool.add_repository(target.get_package_repository())
-        repo_pool.add_repository(af_repo.bundle_repo, secondary=True)
+        repo_pool.add_repository(
+            af_repo.bundle_repo,
+            priority=poetry_repository_pool.Priority.SUPPLEMENTAL,
+        )
 
         item_repo = root_pkg.get_package_repository(target, io=self.io)
         if item_repo is not None and item_repo is not af_repo.bundle_repo:
-            repo_pool.add_repository(item_repo, secondary=True)
+            repo_pool.add_repository(
+                item_repo,
+                priority=poetry_repository_pool.Priority.SUPPLEMENTAL,
+            )
 
         provider = af_repo.Provider(root, repo_pool, self.io, extras=extras)
         solver = puzzle.Solver(root, repo_pool, [], [], self.io)
@@ -274,7 +281,7 @@ class Build(base.Command):
 
         pkg_map: dict[mpkg_base.NormalizedName, mpkg_base.BasePackage] = {}
         graph = {}
-        for dep_package in resolution[0]:
+        for dep_package in resolution:
             pkg_map[dep_package.name] = cast(
                 mpkg_base.BasePackage, dep_package
             )
@@ -314,7 +321,7 @@ class Build(base.Command):
 
         pkg_map = {}
         graph = {}
-        for dep_package in resolution[0]:
+        for dep_package in resolution:
             pkg_map[dep_package.name] = cast(
                 mpkg_base.BasePackage, dep_package
             )

@@ -58,7 +58,7 @@ class BundledRustPackage(base.BundledPackage):
                     pre=None,
                     dev=poetry_pep440.ReleaseTag("dev", int(commits)),
                 )
-                .to_string(short=False)
+                .to_string()
             )
 
         return version
@@ -126,9 +126,11 @@ class BundledAdHocRustPackage(BundledRustPackage):
     ) -> BundledAdHocRustPackage:
         sources = cls._get_sources(version)
 
-        if isinstance(sources[0], mpkg_sources.LocalSource):
-            source_dir = sources[0].url
-
+        if not isinstance(sources[0], mpkg_sources.LocalSource):
+            raise RuntimeError(
+                "expected bundled Rust package source to be local"
+            )
+        source_dir = sources[0].url
         version = cls.version_from_cargo(pathlib.Path(source_dir))
         if not revision:
             revision = "1"
