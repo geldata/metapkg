@@ -20,7 +20,6 @@ from poetry.core.packages import vcs_dependency as poetry_vcsdep
 from poetry.packages import dependency_package as poetry_deppkg
 from poetry.core.packages import package as poetry_pkg
 from poetry.mixology import incompatibility as poetry_incompat
-from poetry.mixology import version_solver as poetry_versolver
 from poetry.puzzle import provider as poetry_provider
 from poetry.vcs import git as poetry_git
 
@@ -28,37 +27,6 @@ from . import sources as mpkg_sources
 
 if TYPE_CHECKING:
     from cleo.io import io as cleo_io
-
-
-# def _DependencyCache_search_for(
-#     self: poetry_versolver.DependencyCache,
-#     dependency: poetry_dep.Dependency,
-# ) -> list[poetry_deppkg.DependencyPackage]:
-#     key = (
-#         dependency.complete_name,
-#         dependency.pretty_constraint,
-#         dependency.source_type,
-#         dependency.source_url,
-#         dependency.source_reference,
-#         dependency.source_subdirectory,
-#     )
-
-#     packages = self._cache.get(key)  # type: ignore [arg-type]
-#     if packages is None:
-#         packages = self._provider.search_for(dependency)
-#     else:
-#         packages = [
-#             p
-#             for p in packages
-#             if dependency.constraint.allows(p.package.version)
-#         ]
-
-#     self._cache[key] = packages  # type: ignore [index]
-
-#     return packages
-
-
-# poetry_versolver.DependencyCache._search_for = _DependencyCache_search_for  # type: ignore
 
 
 class Pool(poetry_pool.RepositoryPool):
