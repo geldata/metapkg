@@ -399,6 +399,9 @@ class Build(base.Command):
         return reresolve_deps
 
     def _clamp_rlimit_nofile(self) -> None:
+        if sys.platform == "win32":
+            return
+
         try:
             import resource
         except ImportError:
