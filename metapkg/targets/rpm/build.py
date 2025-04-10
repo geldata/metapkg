@@ -696,7 +696,7 @@ class Build(targets.Build):
             "rpmbuild",
             *args,
             cwd=str(self.get_spec_root(relative_to="fsroot")),
-            stdout=self._io.output.stream,
+            stdout=self.stream,
             stderr=subprocess.STDOUT,
         )
 
@@ -705,7 +705,7 @@ class Build(targets.Build):
             "-i",
             f"{self._root_pkg.name_slot}.spec",
             cwd=str(self.get_spec_root(relative_to="fsroot")),
-            stdout=self._io.output.stream,
+            stdout=self.stream,
             stderr=subprocess.STDOUT,
         )
 

@@ -10,9 +10,12 @@ import pathlib
 import sys
 import tempfile
 
-from poetry import mixology
+from cleo.helpers import argument, option
+
+from poetry import puzzle
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import project_package
+from poetry.repositories import repository_pool as poetry_repository_pool
 from poetry.utils import env as poetry_env
 
 from metapkg import targets
@@ -24,32 +27,98 @@ from . import base
 
 
 class Build(base.Command):
-    """Build the specified package
-
-    build
-        { name : Package to build. }
-        { --jobs= : Use up to N processes in parallel to build. }
-        { --dest= : Destination path. }
-        { --keepwork : Do not remove the work directory. }
-        { --generic : Build a generic target. }
-        { --arch= : Target architecture, if different from host. }
-        { --libc= : Libc to target. }
-        { --build-source : Build source packages. }
-        { --build-debug : Build debug symbol packages. }
-        { --release : Whether this build is a release. }
-        { --source-ref= : Source version to build (VCS ref or tarball version). }
-        { --pkg-revision= : Override package revision number (defaults to 1). }
-        { --pkg-subdist= : Set package sub-distribution (e.g. nightly). }
-        { --pkg-tags= : Comma-separated list of key=value pairs to include in
-                        pckage metadata. }
-        { --pkg-compression= : Comma-separated list of compression encodings to
-                               apply if building for the specified target
-                               produces a tarball (defaults to gzip,zstd). }
-        { --extra-optimizations : Enable extra optimization
-                                  (increases build times). }
-    """
-
-    help = """Builds the specified package on the current platform."""
+    name = "build"
+    description = """Builds the specified package on the current platform."""
+    arguments = [
+        argument(
+            "name",
+            description="Package to build",
+        ),
+    ]
+    options = [
+        option(
+            "jobs",
+            description="Use up to N processes in parallel to build.",
+            flag=False,
+        ),
+        option(
+            "dest",
+            description="Destination path.",
+            flag=False,
+        ),
+        option(
+            "keepwork",
+            description="Do not remove the work directory upon exit.",
+            flag=True,
+        ),
+        option(
+            "generic",
+            description="Build a generic artifact.",
+            flag=True,
+        ),
+        option(
+            "arch",
+            description="Target architecture, if different from host.",
+            flag=False,
+        ),
+        option(
+            "libc",
+            description="Libc to target.",
+            flag=False,
+        ),
+        option(
+            "build-source",
+            description="Build source packages.",
+            flag=True,
+        ),
+        option(
+            "build-debug",
+            description="Build debug packages.",
+            flag=True,
+        ),
+        option(
+            "release",
+            description="Whether this build is a release.",
+            flag=True,
+        ),
+        option(
+            "source-ref",
+            description="Source version to build (VCS ref or tarball version).",
+            flag=False,
+        ),
+        option(
+            "pkg-revision",
+            description="Override package revision number (defaults to 1).",
+            flag=False,
+        ),
+        option(
+            "pkg-subdist",
+            description="Set package sub-distribution (e.g. nightly).",
+            flag=False,
+        ),
+        option(
+            "pkg-tags",
+            description=(
+                "Comma-separated list of key=value pairs to include "
+                "in package metadata."
+            ),
+            flag=False,
+        ),
+        option(
+            "pkg-compression",
+            description=(
+                "Comma-separated list of compression encodings to apply "
+                "if building for the specified target produces a tarball "
+                "(defaults to gzip,zstd)."
+            ),
+            flag=False,
+        ),
+        option(
+            "extra-optimizations",
+            description="Enable extra optimization (increases build times).",
+            flag=True,
+        ),
+    ]
 
     _loggers = ["metapkg.build"]
 
@@ -193,18 +262,26 @@ class Build(base.Command):
 
         repo_pool = af_repo.Pool()
         repo_pool.add_repository(target.get_package_repository())
-        repo_pool.add_repository(af_repo.bundle_repo, secondary=True)
+        repo_pool.add_repository(
+            af_repo.bundle_repo,
+            priority=poetry_repository_pool.Priority.SUPPLEMENTAL,
+        )
 
         item_repo = root_pkg.get_package_repository(target, io=self.io)
         if item_repo is not None and item_repo is not af_repo.bundle_repo:
-            repo_pool.add_repository(item_repo, secondary=True)
+            repo_pool.add_repository(
+                item_repo,
+                priority=poetry_repository_pool.Priority.SUPPLEMENTAL,
+            )
 
         provider = af_repo.Provider(root, repo_pool, self.io, extras=extras)
-        resolution = mixology.resolve_version(root, provider)
+        solver = puzzle.Solver(root, repo_pool, [], [], self.io)
+        solver._provider = provider
+        resolution = solver._solve()
 
         pkg_map: dict[mpkg_base.NormalizedName, mpkg_base.BasePackage] = {}
         graph = {}
-        for dep_package in resolution.packages:
+        for dep_package in resolution:
             pkg_map[dep_package.name] = cast(
                 mpkg_base.BasePackage, dep_package
             )
@@ -234,11 +311,17 @@ class Build(base.Command):
             include_build_reqs=True,
             extras=extras,
         )
-        resolution = mixology.resolve_version(build_root, provider)
+        solver = puzzle.Solver(build_root, repo_pool, [], [], self.io)
+        solver._provider = provider
+        mpkg_base.all_requires_include_build_reqs = True
+        try:
+            resolution = solver._solve()
+        finally:
+            mpkg_base.all_requires_include_build_reqs = False
 
         pkg_map = {}
         graph = {}
-        for dep_package in resolution.packages:
+        for dep_package in resolution:
             pkg_map[dep_package.name] = cast(
                 mpkg_base.BasePackage, dep_package
             )
@@ -316,6 +399,9 @@ class Build(base.Command):
         return reresolve_deps
 
     def _clamp_rlimit_nofile(self) -> None:
+        if sys.platform == "win32":
+            return
+
         try:
             import resource
         except ImportError:
@@ -324,7 +410,7 @@ class Build(base.Command):
             try:
                 fno_soft, fno_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
             except resource.error:
-                self.io.write_warning_line("could not read RLIMIT_NOFILE")
+                self.io.write_error_line("could not read RLIMIT_NOFILE")
             else:
                 if fno_soft > 8192 or fno_hard > 8192:
                     try:
@@ -333,6 +419,6 @@ class Build(base.Command):
                             (min(8192, fno_soft), min(8192, fno_hard)),
                         )
                     except resource.error:
-                        self.io.write_warning_line(
+                        self.io.write_error_line(
                             "could not read RLIMIT_NOFILE"
                         )

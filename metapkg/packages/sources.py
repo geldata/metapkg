@@ -214,6 +214,7 @@ class HttpsSource(BaseSource):
             name_tpl = f"{pkg.unique_name}{{part}}.tar{{comp}}"
         src = self.download(io)
         copy = True
+        target_path = None
         if "archive" in self.extras and not self.extras["archive"]:
             copy = False
             comp = ".gz"
@@ -253,6 +254,7 @@ class HttpsSource(BaseSource):
             target_path = target_dir / name_tpl.format(part=part, comp=comp)
             shutil.copy(src, target_path)
 
+        assert target_path is not None
         return target_path
 
     def tarball(
@@ -592,7 +594,7 @@ def unpack_tar(
         else:
             raise ValueError(f"{archive.name} is not a supported archive")
 
-        with tarfile.open(archive, mode=f"r:{compression}") as tf:
+        with tarfile.open(archive, mode=f"r:{compression}") as tf:  # type: ignore
             for member in tf.getmembers():
                 if strip_components:
                     member_parts = pathlib.Path(member.name).parts

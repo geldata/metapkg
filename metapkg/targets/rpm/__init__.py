@@ -243,7 +243,7 @@ class BaseRPMTarget(targets.FHSTarget, targets.LinuxDistroTarget):
             "rpm-build",
             "rpmlint",
             "yum-utils",
-            stdout=build._io.output.stream,
+            stdout=build.stream,
             stderr=subprocess.STDOUT,
         )
 
@@ -252,7 +252,7 @@ class BaseRPMTarget(targets.FHSTarget, targets.LinuxDistroTarget):
             "-y",
             spec,
             cwd=str(build.get_spec_root(relative_to="fsroot")),
-            stdout=build._io.output.stream,
+            stdout=build.stream,
             stderr=subprocess.STDOUT,
         )
 
@@ -287,7 +287,7 @@ class RHEL9OrNewerTarget(RHEL7OrNewerTarget):
             "install",
             "-y",
             "systemd-rpm-macros",  # for %_unitdir
-            stdout=build._io.output.stream,
+            stdout=build.stream,
             stderr=subprocess.STDOUT,
         )
 
@@ -306,7 +306,7 @@ class FedoraTarget(RHEL7OrNewerTarget):
             "-y",
             spec,
             cwd=str(build.get_spec_root(relative_to="fsroot")),
-            stdout=build._io.output.stream,
+            stdout=build.stream,
             stderr=subprocess.STDOUT,
         )
 
@@ -327,8 +327,6 @@ class AmazonLinuxTarget(RHEL7OrNewerTarget):
             "-y",
             spec,
             cwd=str(build.get_spec_root(relative_to="fsroot")),
-            stdout=build._io.output.stream,
-            stderr=subprocess.STDOUT,
         )
 
 

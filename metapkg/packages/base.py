@@ -3,6 +3,7 @@ from typing import (
     TYPE_CHECKING,
     Any,
     ClassVar,
+    Iterable,
     Literal,
     Mapping,
     Sequence,
@@ -35,9 +36,8 @@ import packaging.utils
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import dependency_group as poetry_depgroup
 from poetry.core.packages import package as poetry_pkg
-from poetry.core.semver import version as poetry_version
 from poetry.core.version import pep440 as poetry_pep440
-from poetry.core.constraints import version as poetry_constr
+from poetry.core.constraints import version as poetry_version
 from poetry.core.version.pep440 import segments as poetry_pep440_segments
 from poetry.core.spdx import helpers as poetry_spdx_helpers
 from poetry.repositories import exceptions as poetry_repo_exc
@@ -57,6 +57,7 @@ get_build_requirements = repository.get_build_requirements
 set_build_requirements = repository.set_build_requirements
 canonicalize_name = packaging.utils.canonicalize_name
 NormalizedName = packaging.utils.NormalizedName
+all_requires_include_build_reqs: bool = False
 
 
 Args: TypeAlias = dict[str, Union[str, pathlib.Path, None]]
@@ -85,7 +86,45 @@ class MetaPackage:
     dependencies: dict[str, str]
 
 
-class BasePackage(poetry_pkg.Package):
+class PackageWithPrettyVersion(poetry_pkg.Package):
+    def __init__(
+        self,
+        name: str,
+        version: str | poetry_version.Version,
+        source_type: str | None = None,
+        source_url: str | None = None,
+        source_reference: str | None = None,
+        source_resolved_reference: str | None = None,
+        source_subdirectory: str | None = None,
+        features: Iterable[str] | None = None,
+        develop: bool = False,
+        yanked: str | bool = False,
+        *,
+        pretty_version: str | None = None,
+    ) -> None:
+        super().__init__(
+            name=name,
+            version=version,
+            source_type=source_type,
+            source_url=source_url,
+            source_reference=source_reference,
+            source_resolved_reference=source_resolved_reference,
+            source_subdirectory=source_subdirectory,
+            features=features,
+            develop=develop,
+            yanked=yanked,
+        )
+
+        if pretty_version:
+            self._pretty_version = pretty_version
+        else:
+            if isinstance(version, poetry_version.Version):
+                self._pretty_version = version.text
+            else:
+                self._pretty_version = version
+
+
+class BasePackage(PackageWithPrettyVersion):
     @property
     def slot_suffix(self) -> str:
         return ""
@@ -424,6 +463,15 @@ class BasePackage(poetry_pkg.Package):
     def get_package_layout(self, build: targets.Build) -> PackageFileLayout:
         return PackageFileLayout.REGULAR
 
+    @property
+    def all_requires(
+        self,
+    ) -> list[poetry_dep.Dependency]:
+        if all_requires_include_build_reqs:
+            return super().all_requires + get_build_requirements(self)
+        else:
+            return super().all_requires
+
 
 @dataclasses.dataclass(kw_only=True)
 class PkgConfigMeta:
@@ -446,7 +494,7 @@ BundledPackage_T = TypeVar("BundledPackage_T", bound="BundledPackage")
 RequirementsSpec = Union[
     list[str | poetry_dep.Dependency],
     Mapping[
-        str | poetry_constr.VersionConstraint,
+        str | poetry_version.VersionConstraint,
         Sequence[str | poetry_dep.Dependency],
     ],
 ]
@@ -535,15 +583,15 @@ class BundledPackage(BasePackage):
                     **cls.get_source_url_variables(version),
                 )
                 extras = af_sources.SourceExtraDecl(
-                    source.get("extras", {})
-                )  # type: ignore
+                    source.get("extras", {})  # type: ignore
+                )
                 if extras:
                     if "version" not in extras:
                         extras["version"] = version
                 else:
                     extras = af_sources.SourceExtraDecl({"version": version})
 
-                if "vcs_version" not in extras:
+                if "vcs_version" not in extras and "version" in extras:
                     extras["vcs_version"] = cls.to_vcs_version(
                         extras["version"]
                     )
@@ -624,33 +672,6 @@ class BundledPackage(BasePackage):
         return tools.git.Git(repo_dir)
 
     @classmethod
-    def resolve_vcs_version(
-        cls,
-        io: cleo_io.IO,
-        repo: tools.git.Git,
-        version: str | None = None,
-    ) -> str:
-        rev: str
-
-        if version is None:
-            rev = repo.rev_parse("HEAD").strip()
-        else:
-            output = repo.run("ls-remote", repo.remote_url(), version)
-
-            if output:
-                rev, _ = output.split()
-                # If it's a tag, resolve the underlying commit.
-                if repo.run("cat-file", "-t", rev) == "tag":
-                    rev = repo.run("rev-list", "-n", "1", rev)
-            else:
-                # The name can be a branch or tag, so we attempt to look it up
-                # with ls-remote. If we don't find anything, we assume it's a
-                # commit hash.
-                rev = version
-
-        return rev
-
-    @classmethod
     def get_next_feature_version(
         cls,
         version: poetry_version.Version,
@@ -692,9 +713,9 @@ class BundledPackage(BasePackage):
                     local=None,
                     pre=None,
                     dev=poetry_pep440.ReleaseTag("dev", int(commits)),
-                ).to_string(short=False)
+                ).to_string()
             else:
-                ver = parsed_ver.to_string(short=False)
+                ver = parsed_ver.to_string()
 
         return ver
 
@@ -713,6 +734,7 @@ class BundledPackage(BasePackage):
         sources = list(cls._get_sources(version))
         vcs_source = cls.get_vcs_source(io, version)
         is_git = vcs_source is not None
+        git_date = ""
 
         if vcs_source is not None:
             sources[0] = vcs_source
@@ -721,7 +743,7 @@ class BundledPackage(BasePackage):
                 vcs_version = cls.to_vcs_version(version)
             else:
                 vcs_version = None
-            source_version = cls.resolve_vcs_version(io, repo, vcs_version)
+            source_version = repo.peel_ref(vcs_version or "HEAD")
             version = cls.version_from_vcs_version(
                 io, repo, source_version, is_release
             )
@@ -736,7 +758,6 @@ class BundledPackage(BasePackage):
             )
         elif version is not None:
             source_version = version
-            git_date = ""
         elif isinstance(sources[0], af_sources.LocalSource):
             source_dir = sources[0].url
             version = cls.version_from_source(pathlib.Path(source_dir))
@@ -855,9 +876,11 @@ class BundledPackage(BasePackage):
         reqs.extend(self.get_requirements())
 
         if reqs:
-            if poetry_depgroup.MAIN_GROUP not in self._dependency_groups:
-                self._dependency_groups[poetry_depgroup.MAIN_GROUP] = (
-                    poetry_depgroup.DependencyGroup(poetry_depgroup.MAIN_GROUP)
+            if not self.has_dependency_group(poetry_depgroup.MAIN_GROUP):
+                self.add_dependency_group(
+                    poetry_depgroup.DependencyGroup(
+                        poetry_depgroup.MAIN_GROUP
+                    ),
                 )
 
             main_group = self._dependency_groups[poetry_depgroup.MAIN_GROUP]
@@ -892,6 +915,10 @@ class BundledPackage(BasePackage):
                 )
                 repository.bundle_repo.add_package(pkg)
 
+    @property
+    def pretty_version(self) -> str:
+        return self._pretty_version
+
     def _get_requirements(
         self,
         spec: RequirementsSpec,
@@ -906,7 +933,7 @@ class BundledPackage(BasePackage):
         else:
             for ver, ver_reqs in spec.items():
                 if isinstance(ver, str):
-                    ver = poetry_constr.parse_constraint(ver)
+                    ver = poetry_version.parse_constraint(ver)
                 if ver.allows(self.version):
                     req_spec.extend(ver_reqs)
 
@@ -1229,7 +1256,7 @@ def merge_requirements(
     *specs: RequirementsSpec,
 ) -> RequirementsSpec:
     result: collections.defaultdict[
-        str | poetry_constr.VersionConstraint,
+        str | poetry_version.VersionConstraint,
         list[str | poetry_dep.Dependency],
     ] = collections.defaultdict(list)
     for spec in specs:
@@ -1261,7 +1288,7 @@ def _get_bundled_pkg_config_meta(name: str) -> PkgConfigMeta:
 def _get_pkg_in_bundle_repo(dep: poetry_dep.Dependency) -> poetry_pkg.Package:
     packages = repository.bundle_repo.find_packages(dep)
     if not packages:
-        raise poetry_repo_exc.PackageNotFound(
+        raise poetry_repo_exc.PackageNotFoundError(
             f"package {dep.pretty_name} not found in bundled repo."
         )
 
@@ -1569,7 +1596,7 @@ class BundledCAutoconfPackage(BundledCPackage):
         super().configure_dependency(build, dep, conf_args, conf_env, wd=wd)
         try:
             pkg_config_meta = self.get_dep_pkg_config_meta(dep)
-        except poetry_repo_exc.PackageNotFound:
+        except poetry_repo_exc.PackageNotFoundError:
             # This is a preinstalled system build-time package,
             # for which we have no in-tree definition.
             return

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from typing import (
     TYPE_CHECKING,
+    Collection,
     Iterator,
 )
 
@@ -11,17 +12,14 @@ import pathlib
 
 import packaging.utils
 
-from poetry.repositories import exceptions as poetry_repo_exc
-from poetry.repositories import pool as poetry_pool
+from poetry.repositories import repository_pool as poetry_pool
 from poetry.repositories import repository as poetry_repo
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import dependency_group as poetry_depgroup
 from poetry.core.packages import vcs_dependency as poetry_vcsdep
-from poetry.core.semver import version as poetry_version
 from poetry.packages import dependency_package as poetry_deppkg
 from poetry.core.packages import package as poetry_pkg
 from poetry.mixology import incompatibility as poetry_incompat
-from poetry.mixology import version_solver as poetry_versolver
 from poetry.puzzle import provider as poetry_provider
 from poetry.vcs import git as poetry_git
 
@@ -31,75 +29,24 @@ if TYPE_CHECKING:
     from cleo.io import io as cleo_io
 
 
-def _DependencyCache_search_for(
-    self: poetry_versolver.DependencyCache,
-    dependency: poetry_dep.Dependency,
-) -> list[poetry_deppkg.DependencyPackage]:
-    key = (
-        dependency.complete_name,
-        dependency.pretty_constraint,
-        dependency.source_type,
-        dependency.source_url,
-        dependency.source_reference,
-        dependency.source_subdirectory,
-    )
-
-    packages = self.cache.get(key)  # type: ignore
-    if packages is None:
-        packages = self.provider.search_for(dependency)
-    else:
-        packages = [
-            p
-            for p in packages
-            if dependency.constraint.allows(p.package.version)
-        ]
-
-    self.cache[key] = packages  # type: ignore
-
-    return packages
-
-
-poetry_versolver.DependencyCache._search_for = _DependencyCache_search_for  # type: ignore
-
-
-class Pool(poetry_pool.Pool):
-    def package(
-        self,
-        name: str,
-        version: poetry_version.Version,
-        extras: list[str] | None = None,
-        repository: str | None = None,
-    ) -> poetry_pkg.Package:
-        for repo in self.repositories:
-            try:
-                package = repo.package(name, version, extras=extras)
-            except poetry_repo_exc.PackageNotFound:
-                continue
-
-            if package:
-                self._packages.append(package)
-
-                return package
-
-        raise poetry_repo_exc.PackageNotFound(
-            f"Package {name} ({version}) not found."
-        )
-
-    def find_packages(
-        self, dependency: poetry_dep.Dependency
-    ) -> list[poetry_pkg.Package]:
-        for repo in self.repositories:
-            packages = repo.find_packages(dependency)
-            if packages:
-                return packages
-
-        return []
+class Pool(poetry_pool.RepositoryPool):
+    pass
 
 
 class BundleRepository(poetry_repo.Repository):
     def add_package(self, package: poetry_pkg.Package) -> None:
         if not self.has_package(package):
             super().add_package(package)
+
+    def remove_package(self, package: poetry_pkg.Package) -> None:
+        index = None
+        for i, repo_package in enumerate(self.packages):
+            if repo_package == package:
+                index = i
+                break
+
+        if index is not None:
+            del self._packages[index]
 
 
 bundle_repo = BundleRepository("bundled")
@@ -109,13 +56,17 @@ class Provider(poetry_provider.Provider):
     def __init__(
         self,
         package: poetry_pkg.Package,
-        pool: poetry_pool.Pool,
+        pool: poetry_pool.RepositoryPool,
         io: cleo_io.IO,
         *,
+        locked: list[poetry_pkg.Package] | None = None,
+        active_root_extras: (
+            Collection[packaging.utils.NormalizedName] | None
+        ) = None,
         include_build_reqs: bool = False,
         extras: list[str] | None = None,
     ) -> None:
-        super().__init__(package, pool, io)
+        super().__init__(package, pool, io, locked=locked)
         self.include_build_reqs = include_build_reqs
         self._active_extras = set(extras) if extras else set()
 
@@ -125,7 +76,7 @@ class Provider(poetry_provider.Provider):
     ) -> poetry_pkg.Package:
         from . import python
 
-        pkg = self.get_package_from_vcs(
+        pkg = self._direct_origin.get_package_from_vcs(
             dependency.vcs,
             dependency.source,
             branch=dependency.branch,
@@ -180,25 +131,25 @@ class Provider(poetry_provider.Provider):
 
     def incompatibilities_for(
         self,
-        package: poetry_deppkg.DependencyPackage,
+        dependency_package: poetry_deppkg.DependencyPackage,
     ) -> list[poetry_incompat.Incompatibility]:
         if self.include_build_reqs:
-            breqs = get_build_requirements(package.package)
-            with extra_requirements(package.package, breqs):
-                return super().incompatibilities_for(package)
+            breqs = get_build_requirements(dependency_package.package)
+            with extra_requirements(dependency_package.package, breqs):
+                return super().incompatibilities_for(dependency_package)
         else:
-            return super().incompatibilities_for(package)
+            return super().incompatibilities_for(dependency_package)
 
     def complete_package(
         self,
-        package: poetry_deppkg.DependencyPackage,
+        dependency_package: poetry_deppkg.DependencyPackage,
     ) -> poetry_deppkg.DependencyPackage:
-        chain = [package.package.all_requires]
-        build_requires = get_build_requirements(package.package)
+        chain = [dependency_package.package.all_requires]
+        build_requires = get_build_requirements(dependency_package.package)
         if build_requires:
             chain.append(build_requires)
 
-        pkg = super().complete_package(package)
+        pkg = super().complete_package(dependency_package)
 
         for dep in itertools.chain.from_iterable(chain):
             dep_in_extras = {str(e) for e in dep.in_extras}

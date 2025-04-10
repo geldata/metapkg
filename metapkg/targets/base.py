@@ -5,6 +5,7 @@ from typing import (
     Literal,
     Mapping,
     NamedTuple,
+    TextIO,
 )
 
 import collections
@@ -34,6 +35,7 @@ if TYPE_CHECKING:
     )
 
     from cleo.io.io import IO
+    from cleo.io.outputs.stream_output import StreamOutput
     from distro import distro
     from poetry.utils import env as poetry_env
     from poetry.repositories import repository as poetry_repo
@@ -543,7 +545,7 @@ class LinuxTarget(PosixTarget):
         with open(path, "rb") as f:
             header = f.read(18)
             signature = header[:4]
-            if signature == b"\x7FELF":
+            if signature == b"\x7fELF":
                 byteorder: Literal["big", "little"]
                 if header[5] == 2:
                     byteorder = "big"
@@ -758,6 +760,13 @@ class Build:
     @property
     def io(self) -> IO:
         return self._io
+
+    @property
+    def stream(self) -> TextIO:
+        output = self._io.output
+        if TYPE_CHECKING:
+            assert isinstance(output, StreamOutput)
+        return output.stream
 
     @property
     def root_package(self) -> mpkg_base.BundledPackage:
@@ -2175,7 +2184,7 @@ class Build:
     ) -> None:
         new_paths = list(paths)
         if not args.get(key) and not ignore_env:
-            new_paths.insert(0, f"${{{key}}}")
+            new_paths.insert(0, f'"${{{key}}}"')
         self.sh_append_quoted_flags(args, key, new_paths, sep=sep)
 
     def sh_append_paths(
@@ -2203,7 +2212,7 @@ class Build:
     ) -> None:
         new_paths = list(paths)
         if not args.get(key) and not ignore_env:
-            new_paths.append(f"${{{key}}}")
+            new_paths.append(f'"${{{key}}}"')
         self.sh_prepend_quoted_flags(args, key, new_paths, sep=sep)
 
     def sh_prepend_paths(

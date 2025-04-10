@@ -14,9 +14,10 @@ import textwrap
 
 from poetry.core.packages import dependency as poetry_dep
 from poetry.core.packages import package as poetry_pkg
-from poetry.core.semver import version as poetry_version
+from poetry.core.constraints import version as poetry_version
 from poetry.repositories import pypi_repository
 from poetry.repositories import exceptions as poetry_repo_exc
+from poetry.utils import cache as poetry_cache
 
 import build as pypa_build
 import build.env as pypa_build_env
@@ -55,6 +56,9 @@ class PyPiRepository(pypi_repository.PyPiRepository):
             "flit-core": FlitCore,
             "tomli": Tomli,
         }
+        self._dep_cache: poetry_cache.FileCache[list[str]] = (
+            poetry_cache.FileCache(path=self._cache_dir)
+        )
 
     def register_package_impl(
         self,
@@ -87,17 +91,14 @@ class PyPiRepository(pypi_repository.PyPiRepository):
         self,
         name: str,
         version: poetry_version.Version,
-        extras: list[str] | None = None,
     ) -> poetry_pkg.Package:
         if name.startswith("pypkg-"):
             name = name[len("pypkg-") :]
 
         try:
-            orig_package = super().package(
-                name=name, version=version, extras=extras
-            )
+            orig_package = super().package(name=name, version=version)
         except ValueError as e:
-            raise poetry_repo_exc.PackageNotFound(
+            raise poetry_repo_exc.PackageNotFoundError(
                 f"Package {name} ({version}) not found."
             ) from e
 
@@ -145,7 +146,7 @@ class PyPiRepository(pypi_repository.PyPiRepository):
         if self._disable_cache:
             build_reqs = self._get_build_requires(package)
         else:
-            build_reqs = self._cache.remember_forever(
+            build_reqs = self._dep_cache.remember(
                 f"{package.unique_name}:build-requirements",
                 lambda: self._get_build_requires(package),
             )
@@ -196,22 +197,9 @@ class PyPiRepository(pypi_repository.PyPiRepository):
     ) -> dict[str, Any]:
         if name.startswith("pypkg-"):
             name = name[len("pypkg-") :]
-        if self._disable_cache:
-            pypi_info = self._get_pypi_info(name, version)
-        else:
-            pypi_info = self._cache.remember_forever(
-                f"{name}:{version}:pypi-info",
-                lambda: self._get_pypi_info(name, version),
-            )
-
-        return pypi_info
-
-    def _get_pypi_info(
-        self, name: str, version: poetry_version.Version
-    ) -> dict[str, Any]:
         json_data = self._get(f"pypi/{name}/{version}/json")
         if json_data is None:
-            raise poetry_repo_exc.PackageNotFound(
+            raise poetry_repo_exc.PackageNotFoundError(
                 f"Package {name} ({version}) not found."
             )
         else:
@@ -637,7 +625,7 @@ class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
             name=name,
             pretty_version=pretty_version,
             requires=requires,
-            source_version=cls.resolve_vcs_version(io, repo),
+            source_version=repo.rev_parse("HEAD"),
         )
         package.dist_name = dist.name
         repository.set_build_requirements(
