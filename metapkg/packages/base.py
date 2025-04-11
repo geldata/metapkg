@@ -123,6 +123,10 @@ class PackageWithPrettyVersion(poetry_pkg.Package):
             else:
                 self._pretty_version = version
 
+    @property
+    def pretty_version(self) -> str:
+        return self._pretty_version
+
 
 class BasePackage(PackageWithPrettyVersion):
     @property
