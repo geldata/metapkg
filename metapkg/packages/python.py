@@ -7,7 +7,9 @@ from typing import (
 )
 
 import copy
+import functools
 import pathlib
+import re
 import shlex
 import tempfile
 import textwrap
@@ -21,6 +23,9 @@ from poetry.utils import cache as poetry_cache
 
 import build as pypa_build
 import build.env as pypa_build_env
+import packaging.version
+import packaging.utils
+
 import pyproject_hooks
 
 import distlib.database
@@ -32,8 +37,6 @@ from . import base
 from . import sources as af_sources
 from . import repository
 from .utils import python_dependency_from_pep_508
-
-import packaging.utils
 
 
 if TYPE_CHECKING:
@@ -300,8 +303,59 @@ def is_build_system_bootstrap_package(
     }
 
 
+#
+# The following it the setuptools' dist_info sanitation protocol
+# attempting to bring arbitrary version specs into PEP440 compliance.
+#
+# SPDX-SnippetBegin
+# SPDX-License-Identifier: MIT
+# SPDX-SnippetCopyrightText: Python Packaging Authority <distutils-sig@python.org>
+# SDPX-SnippetName: dist_info version normalization
+#
+_UNSAFE_NAME_CHARS = re.compile(r"[^A-Z0-9._-]+", re.I)
+_PEP440_FALLBACK = re.compile(
+    r"^v?(?P<safe>(?:[0-9]+!)?[0-9]+(?:\.[0-9]+)*)", re.I
+)
+_NON_ALPHANUMERIC = re.compile(r"[^A-Z0-9]+", re.I)
+
+
+def _safe_version(version: str) -> str:
+    v = version.replace(" ", ".")
+    try:
+        return str(packaging.version.Version(v))
+    except packaging.version.InvalidVersion:
+        attempt = _UNSAFE_NAME_CHARS.sub("-", v)
+        return str(packaging.version.Version(attempt))
+
+
+def _best_effort_version(version: str) -> str:
+    try:
+        return _safe_version(version)
+    except packaging.version.InvalidVersion:
+        v = version.replace(" ", ".")
+        match = _PEP440_FALLBACK.search(v)
+        if match:
+            safe = match["safe"]
+            rest = v[len(safe) :]
+        else:
+            safe = "0"
+            rest = version
+        safe_rest = _NON_ALPHANUMERIC.sub(".", rest).strip(".")
+        local = f"sanitized.{safe_rest}".strip(".")
+        return _safe_version(f"{safe}.dev0+{local}")
+
+
+# SPDX-SnippetEnd
+
+
+def get_dist_info_dirname(name: base.NormalizedName, version: str) -> str:
+    version = _best_effort_version(version).replace("-", "_").strip("_")
+    return f"{name.replace('-', '_')}-{version}.dist-info"
+
+
 class BasePythonPackage(base.BasePackage):
     source: af_sources.BaseSource
+    dist_name: base.NormalizedName
 
     def sh_get_build_wheel_env(
         self,
@@ -311,6 +365,16 @@ class BasePythonPackage(base.BasePackage):
         wd: str,
     ) -> base.Args:
         return {}
+
+    @functools.cache
+    def get_dist_name(self) -> base.NormalizedName:
+        dist_name = getattr(self, "dist_name", None)
+        if dist_name is None:
+            dist_name = self.name
+            dist_name = base.canonicalize_name(
+                dist_name.removeprefix("pypkg-")
+            )
+        return dist_name
 
     def get_build_script(self, build: targets.Build) -> str:
         sdir = build.get_source_dir(self, relative_to="pkgbuild")
@@ -338,12 +402,7 @@ class BasePythonPackage(base.BasePackage):
             "import pathlib, sys; print(pathlib.Path(sys.argv[1]).resolve())"
         )
 
-        pkgname = getattr(self, "dist_name", None)
-        if pkgname is None:
-            pkgname = self.name
-            if pkgname.startswith("pypkg-"):
-                pkgname = pkgname[len("pypkg-") :]
-
+        dist_name = self.get_dist_name()
         env = build.sh_append_global_flags(
             {
                 "SETUPTOOLS_SCM_PRETEND_VERSION": self.pretty_version,
@@ -353,11 +412,11 @@ class BasePythonPackage(base.BasePackage):
 
         build_deps = build.get_build_reqs(self)
 
-        if is_build_system_bootstrap_package(pkgname):
+        if is_build_system_bootstrap_package(dist_name):
             tarballs = build.get_tarballs(self, relative_to="pkgsource")
             assert len(tarballs) == 1, "expected exactly one tarball"
             _, tarball = tarballs[0]
-            build_command = f'cp "{tarball}" ${{_wheeldir}}/{pkgname}-{self.version}.tar.gz'
+            build_command = f'cp "{tarball}" ${{_wheeldir}}/{dist_name}-{self.version}.tar.gz'
             binary = False
         else:
             args = [
@@ -441,7 +500,7 @@ class BasePythonPackage(base.BasePackage):
                 -f "file://${{_wheeldir}}" \\
                 {'--only-binary' if binary else '--no-binary'} :all: \\
                 --target "${{_target}}" \\
-                "{pkgname}"
+                "{dist_name}"
         """
         )
 
@@ -458,13 +517,9 @@ class BasePythonPackage(base.BasePackage):
         root = build.get_build_install_dir(self, relative_to="pkgbuild")
         wheeldir_script = 'import pathlib; print(pathlib.Path(".").resolve())'
 
-        pkgname = getattr(self, "dist_name", None)
-        if pkgname is None:
-            pkgname = self.name
-            if pkgname.startswith("pypkg-"):
-                pkgname = pkgname[len("pypkg-") :]
+        dist_name = self.get_dist_name()
 
-        binary = not is_build_system_bootstrap_package(pkgname)
+        binary = not is_build_system_bootstrap_package(dist_name)
 
         env = {
             "PIP_DISABLE_PIP_VERSION_CHECK": "1",
@@ -486,7 +541,7 @@ class BasePythonPackage(base.BasePackage):
                 --no-warn-script-location -f "file://${{_wheeldir}}" \\
                 {'--only-binary' if binary else '--no-binary'} :all: \\
                 --root "$(pwd -P)/{root}" \\
-                "{pkgname}"
+                "{dist_name}"
         """
         )
 
@@ -501,12 +556,10 @@ class BasePythonPackage(base.BasePackage):
         prefix = build.get_install_prefix(self)
         dest = build.get_build_install_dir(self, relative_to="pkgbuild")
 
-        pkgname = getattr(self, "dist_name", None)
-        if pkgname is None:
-            pkgname = self.pretty_name
-            if pkgname.startswith("pypkg-"):
-                pkgname = pkgname[len("pypkg-") :]
-        dist_name = pkgname.replace("-", "_")
+        dist_info_dir = get_dist_info_dirname(
+            self.get_dist_name(),
+            self.pretty_version,
+        )
 
         pyscript = textwrap.dedent(
             f"""\
@@ -519,14 +572,9 @@ class BasePythonPackage(base.BasePackage):
                 sitepackages.relative_to('/')
             )
 
-            record = (
-                abs_sitepackages /
-                f'{dist_name}-{self.pretty_version}.dist-info' /
-                'RECORD'
-            )
-
+            record = abs_sitepackages / "{dist_info_dir}" / "RECORD"
             if not record.exists():
-                raise RuntimeError(f'no wheel RECORD for {pkgname}')
+                raise RuntimeError(f'no wheel RECORD for {self.name}')
 
             entries = set()
 
@@ -579,8 +627,6 @@ BundledPythonPackage_T = TypeVar(
 
 
 class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
-    dist_name: str
-
     @classmethod
     def get_package_repository(
         cls, target: targets.Target, io: cleo_io.IO
@@ -627,7 +673,7 @@ class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
             requires=requires,
             source_version=repo.rev_parse("HEAD"),
         )
-        package.dist_name = dist.name
+        package.dist_name = base.canonicalize_name(dist.name)
         repository.set_build_requirements(
             package,
             get_build_requires_from_srcdir(package, repo_dir),
