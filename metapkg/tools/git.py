@@ -75,6 +75,13 @@ class Git(core_git.Git):
                 if tag in sha_map:
                     rev = sha_map[tag]
 
+                # If it's a tag object, peel it.
+                if (
+                    rev is not None
+                    and self.run("cat-file", "-t", rev) == "tag"
+                ):
+                    rev = self.run("rev-list", "-n", "1", rev)
+
             if rev is None:
                 # Try branch (refs/heads/<ref>)
                 branch = f"refs/heads/{ref}"
