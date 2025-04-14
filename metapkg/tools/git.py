@@ -6,6 +6,7 @@ from typing import (
 import os
 import pathlib
 import subprocess
+import sys
 from functools import cached_property
 
 from dulwich import repo as dulwich_repo
@@ -54,6 +55,8 @@ class Git(core_git.Git):
         # commit hash.
         rev = None
         output = self.run("ls-remote", "--heads", "--tags", "origin", ref)
+        if not output:
+            print("git ls-remote produced no output", file=sys.stderr)
         if output:
             lines = output.splitlines()
 
