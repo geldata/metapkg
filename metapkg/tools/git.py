@@ -58,6 +58,7 @@ class Git(core_git.Git):
         if not output:
             print("git ls-remote produced no output", file=sys.stderr)
         if output:
+            print(f"git-ls output:\n{output}")
             lines = output.splitlines()
 
             sha_map: dict[str, str] = {}
