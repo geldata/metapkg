@@ -403,12 +403,11 @@ class BasePythonPackage(base.BasePackage):
         )
 
         dist_name = self.get_dist_name()
-        env = build.sh_append_global_flags(
-            {
-                "SETUPTOOLS_SCM_PRETEND_VERSION": self.pretty_version,
-                "PIP_DISABLE_PIP_VERSION_CHECK": "1",
-            }
-        )
+
+        env = self.get_build_env(build, wd="${_wd}") | {
+            "SETUPTOOLS_SCM_PRETEND_VERSION": self.pretty_version,
+            "PIP_DISABLE_PIP_VERSION_CHECK": "1",
+        }
 
         build_deps = build.get_build_reqs(self)
 
@@ -470,7 +469,6 @@ class BasePythonPackage(base.BasePackage):
 
             binary = True
 
-        env |= self.get_build_env(build, wd="${_wd}")
         env_str = build.sh_format_command("env", env, force_args_eq=True)
 
         build_cmds = [build_command]

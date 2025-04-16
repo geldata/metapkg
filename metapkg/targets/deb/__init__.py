@@ -279,30 +279,32 @@ class BaseDebTarget(targets.FHSTarget, targets.LinuxDistroTarget):
         else:
             return super().get_resource_path(build, resource)
 
-    def get_global_rules(self) -> str:
-        return textwrap.dedent(
-            """\
-            export DH_VERBOSE=1
-            export SHELL = /bin/bash
-            dpkg_buildflags = \
-                DEB_BUILD_MAINT_OPTIONS=$(DEB_BUILD_MAINT_OPTIONS) \
-                dpkg-buildflags
-        """
+    def get_global_make_vars(
+        self,
+        build: targets.Build,
+        flavor: targets.ExprFlavor,
+    ) -> dict[str, str]:
+        opts = (
+            "$(DEB_BUILD_MAINT_OPTIONS)"
+            if flavor == "make"
+            else "${DEB_BUILD_MAINT_OPTIONS}"
         )
+        dpkg_buildflags = f"DEB_BUILD_MAINT_OPTIONS={opts} dpkg-buildflags"
+        return super().get_global_make_vars(build, flavor) | {
+            "DH_VERBOSE": "1",
+            "dpkg_buildflags": dpkg_buildflags,
+        }
 
 
 class ModernDebianTarget(BaseDebTarget):
-    def get_global_rules(self) -> str:
-        return textwrap.dedent(
-            """\
-            export DH_VERBOSE=1
-            export SHELL = /bin/bash
-            export DEB_BUILD_MAINT_OPTIONS = hardening=+all
-            dpkg_buildflags = \
-                DEB_BUILD_MAINT_OPTIONS=$(DEB_BUILD_MAINT_OPTIONS) \
-                dpkg-buildflags
-        """
-        )
+    def get_global_make_vars(
+        self,
+        build: targets.Build,
+        flavor: targets.ExprFlavor,
+    ) -> dict[str, str]:
+        return {
+            "DEB_BUILD_MAINT_OPTIONS": "hardening=+all"
+        } | super().get_global_make_vars(build, flavor)
 
 
 class DebianStretchOrNewerTarget(ModernDebianTarget):

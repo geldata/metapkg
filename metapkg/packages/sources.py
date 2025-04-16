@@ -304,7 +304,7 @@ class LocalSource(BaseSource):
             name_tpl = f"{pkg.unique_name}{{part}}.tar{{comp}}"
         target_path = target_dir / name_tpl.format(part=part, comp=comp)
 
-        tar = shlex.split(build.sh_get_command("tar"))
+        tar = build.get_tool_command("tar")
         tools.cmd(
             *tar,
             *[
@@ -570,8 +570,8 @@ def unpack_tar(
             archive = _win_path_to_msys_path(archive)
             dest = _win_path_to_msys_path(dest)
 
-        tar = build.sh_get_command("tar", relative_to="fsroot")
-        args = [
+        tar = build.get_tool_command("tar", relative_to="fsroot")
+        args = tar + [
             f"-x{compression}",
             f"-f{archive}",
             f"-C{dest}",
@@ -579,7 +579,7 @@ def unpack_tar(
         if strip_components:
             args.append(f"--strip-components={strip_components}")
 
-        tools.cmd(tar, *args)
+        tools.cmd(*args)
     else:
         if ext in (".gz", ".tgz"):
             compression = "gz"

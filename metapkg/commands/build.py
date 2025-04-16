@@ -1,12 +1,13 @@
 from __future__ import annotations
-from typing import cast
+from typing import Iterator, Optional, cast
 
 import collections
+import contextlib
 import datetime
 import graphlib
 import importlib
-import os
 import pathlib
+import shutil
 import sys
 import tempfile
 
@@ -47,6 +48,14 @@ class Build(base.Command):
             flag=False,
         ),
         option(
+            "workdir",
+            description=(
+                "Directory to build in. If not specified a temporary will"
+                " be used."
+            ),
+            flag=False,
+        ),
+        option(
             "keepwork",
             description="Do not remove the work directory upon exit.",
             flag=True,
@@ -79,6 +88,11 @@ class Build(base.Command):
         option(
             "release",
             description="Whether this build is a release.",
+            flag=True,
+        ),
+        option(
+            "enable-sccache",
+            description="Enable sccache.",
             flag=True,
         ),
         option(
@@ -125,6 +139,7 @@ class Build(base.Command):
     def handle(self) -> int:
         pkgname = self.argument("name")
         keepwork = self.option("keepwork")
+        workdir = self.option("workdir")
         destination = self.option("dest")
         generic = self.option("generic")
         arch = self.option("arch")
@@ -135,23 +150,11 @@ class Build(base.Command):
         revision = self.option("pkg-revision")
         subdist = self.option("pkg-subdist")
         is_release = self.option("release")
+        enable_sccache = self.option("enable-sccache")
         extra_opt = self.option("extra-optimizations")
         jobs = self.option("jobs")
         tags_string = self.option("pkg-tags")
         compression_string = self.option("pkg-compression")
-
-        # Older yum, fakeroot and possibly other tools
-        # customarily attempt to iterate over _all_
-        # file descriptors up to the limit and close them
-        # when forking subprocesses, which in the case of
-        # a high limit may be prohibitively expensive,
-        # so clamp RLIMIT_NOFILE to a lower value.
-        self._clamp_rlimit_nofile()
-
-        target = targets.detect_target(
-            self.io, portable=generic, libc=libc, arch=arch
-        )
-        target.prepare()
 
         tags = {}
         if tags_string:
@@ -163,6 +166,140 @@ class Build(base.Command):
         if compression_string:
             compression = compression_string.split(",")
 
+        extra = {}
+        if compression:
+            extra["compression"] = compression
+
+        # Older yum, fakeroot and possibly other tools
+        # customarily attempt to iterate over _all_
+        # file descriptors up to the limit and close them
+        # when forking subprocesses, which in the case of
+        # a high limit may be prohibitively expensive,
+        # so clamp RLIMIT_NOFILE to a lower value.
+        self._clamp_rlimit_nofile()
+
+        with self._workdir(workdir, keepwork) as workdir_path:
+            target = targets.detect_target(
+                self.io, portable=generic, libc=libc, arch=arch
+            )
+            target.prepare()
+
+            pkg, deps, build_deps, env = self._resolve_build_tree(
+                pkgname,
+                version=version,
+                revision=revision,
+                is_release=is_release,
+                target=target,
+                tags=tags,
+            )
+
+            target.build(
+                targets.BuildRequest(
+                    io=self.io,
+                    env=env,
+                    root_pkg=pkg,
+                    deps=deps,
+                    build_deps=build_deps,
+                    workdir=workdir_path,
+                    outputdir=destination,
+                    build_source=build_source,
+                    build_debug=build_debug,
+                    build_date=datetime.datetime.now(tz=datetime.timezone.utc),
+                    revision=revision or "1",
+                    subdist=subdist,
+                    extra_opt=extra_opt,
+                    enable_sccache=enable_sccache,
+                    jobs=jobs or 0,
+                    **extra,
+                ),
+            )
+
+        return 0
+
+    @contextlib.contextmanager
+    def _workdir(
+        self,
+        workdir: Optional[str],
+        keepwork: bool,
+    ) -> Iterator[pathlib.Path]:
+        workdir_made = False
+        tempdir = None
+        workdir_path = None
+
+        try:
+            if not workdir:
+                tempdir = tempfile.TemporaryDirectory(
+                    prefix="metapkg.",
+                    ignore_cleanup_errors=True,
+                    delete=False,
+                )
+                workdir = tempdir.name
+                workdir_made = True
+                workdir_path = pathlib.Path(workdir)
+            else:
+                workdir_path = pathlib.Path(workdir)
+                if workdir_path.exists():
+                    if not workdir_path.is_dir():
+                        raise RuntimeError(
+                            f"{workdir} exists and is not a directory"
+                        )
+                    elif any(workdir_path.iterdir()):
+                        raise RuntimeError(
+                            f"{workdir} exists and is not empty"
+                        )
+                else:
+                    workdir_path.mkdir(parents=True)
+                    workdir_made = True
+
+            workdir_path.chmod(0o755)
+
+            yield workdir_path
+        finally:
+            if not keepwork:
+                if tempdir is not None:
+                    tempdir.cleanup()
+                elif workdir_path is not None:
+                    for item in workdir_path.iterdir():
+                        if item.is_file() or item.is_symlink():
+                            try:
+                                item.unlink()
+                            except OSError as e:
+                                self.io.write_line(
+                                    f"<warning>error while cleaning "
+                                    f"up workdir: {e}"
+                                )
+                        elif item.is_dir():
+                            shutil.rmtree(
+                                item,
+                                ignore_errors=True,
+                                onexc=lambda _func, _file, exc: self.io.write_line(
+                                    f"<warning>error while cleaning "
+                                    f"up workdir: {exc}"
+                                ),
+                            )
+                    if workdir_made:
+                        try:
+                            workdir_path.rmdir()
+                        except OSError as e:
+                            self.io.write_line(
+                                f"<warning>error while cleaning "
+                                f"up workdir: {e}"
+                            )
+
+    def _resolve_build_tree(
+        self,
+        pkgname: str,
+        version: str,
+        revision: str,
+        is_release: bool,
+        target: targets.Target,
+        tags: dict[str, str],
+    ) -> tuple[
+        mpkg_base.BundledPackage,
+        list[mpkg_base.BasePackage],
+        list[mpkg_base.BasePackage],
+        poetry_env.SystemEnv,
+    ]:
         modname, _, clsname = pkgname.rpartition(":")
 
         mod = importlib.import_module(modname)
@@ -193,50 +330,13 @@ class Build(base.Command):
         # Check again
         reresolve_deps = self._check_dep_consistency(packages, build_pkgs)
         if reresolve_deps:
-            self.io.write_error_line(
+            raise RuntimeError(
                 "Unresolveable install-time vs build-time dependency graph. "
                 + "Mismatching dependencies: "
                 + ", ".join(dep.to_pep_508() for dep in reresolve_deps)
             )
-            return 1
 
-        if keepwork:
-            workdir = tempfile.mkdtemp(prefix="metapkg.")
-        else:
-            tempdir = tempfile.TemporaryDirectory(prefix="metapkg.")
-            workdir = tempdir.name
-
-        os.chmod(workdir, 0o755)
-
-        extra = {}
-        if compression:
-            extra["compression"] = compression
-
-        try:
-            target.build(
-                targets.BuildRequest(
-                    io=self.io,
-                    env=env,
-                    root_pkg=root_pkg,
-                    deps=packages,
-                    build_deps=build_pkgs,
-                    workdir=workdir,
-                    outputdir=destination,
-                    build_source=build_source,
-                    build_debug=build_debug,
-                    build_date=datetime.datetime.now(tz=datetime.timezone.utc),
-                    revision=revision or "1",
-                    subdist=subdist,
-                    extra_opt=extra_opt,
-                    jobs=jobs or 0,
-                    **extra,
-                ),
-            )
-        finally:
-            if not keepwork:
-                tempdir.cleanup()
-
-        return 0
+        return root_pkg, packages, build_pkgs, env
 
     def _resolve_deps(
         self,

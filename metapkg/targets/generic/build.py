@@ -39,13 +39,8 @@ class Build(targets.Build):
             raise ValueError(
                 f"unsupported compression scheme(s): {', '.join(unsup)}"
             )
-
-    def prepare(self) -> None:
-        super().prepare()
-
-        self._pkgroot = self._droot / self._root_pkg.name_slot
+        self._pkgroot = self._droot / self._root_pkg.name
         self._srcroot = self._pkgroot / self._root_pkg.name
-
         self._artifactroot = pathlib.Path("..") / "_artifacts"
         self._buildroot = self._artifactroot / "build"
         self._tmproot = self._artifactroot / "tmp"
@@ -205,7 +200,6 @@ class Build(targets.Build):
         return f"{rp.name}_{rp.version.text}.orig-{package.name}{{part}}.tar{{comp}}"
 
     def build(self) -> None:
-        self.prepare_tools()
         self.prepare_tarballs()
         self.prepare_patches()
         self.unpack_sources()
@@ -220,7 +214,7 @@ class Build(targets.Build):
 
     def _apply_patches(self) -> None:
         proot = self.get_patches_root(relative_to="fsroot")
-        patch_cmd = shlex.split(self.sh_get_command("patch"))
+        patch_cmd = self.get_tool_command("patch")
         dep_root = self.get_dir("thirdparty", relative_to="fsroot")
         my_root = self.get_source_abspath()
         for pkgname, patchname in self._patches:
@@ -232,9 +226,6 @@ class Build(targets.Build):
                 cwd=sroot,
             )
 
-    def _get_global_env_vars(self) -> dict[str, str]:
-        return {}
-
     def _write_makefile(self) -> None:
         temp_root = self.get_temp_root(relative_to="sourceroot")
         image_root = self.get_image_root(relative_to="sourceroot")
@@ -245,14 +236,12 @@ class Build(targets.Build):
 
             ROOT = $(dir $(realpath $(firstword $(MAKEFILE_LIST))))
 
-            export SHELL = {bash}
-
             {env}
 
             DESTDIR := /
 
             {temp_root}/stamp/build:
-            \t{build_script}
+            {build_script}
             \t{install_script}
             \tmkdir -p "{temp_root}/stamp"
             \ttouch "{temp_root}/stamp/build"
@@ -267,20 +256,18 @@ class Build(targets.Build):
             bash=self.sh_get_command("bash"),
             temp_root=temp_root,
             image_root=image_root,
-            build_script=self._write_script(
-                "complete", relative_to="sourceroot"
-            ),
+            build_script=self._write_build_script(expr_flavor="make"),
             install_script=self._write_script(
-                "install", relative_to="sourceroot", installable_only=True
+                "install", installable_only=True
             ),
-            copy_tree=self.sh_get_command(
-                "copy-tree", relative_to="sourceroot"
-            ),
+            copy_tree=self.sh_get_command("copy-tree"),
             env="\n".join(
-                f"export {var} = {val}"
-                for var, val in self._get_global_env_vars().items()
+                f"export {var} := {val}"
+                for var, val in self.get_global_make_vars("make").items()
             ),
         )
+
+        print(makefile)
 
         with open(self._srcroot / "Makefile.metapkg", "w") as f:
             f.write(makefile)
@@ -387,8 +374,7 @@ class Build(targets.Build):
         return "\n".join(lines)
 
     def _build(self) -> None:
-        make = self.sh_get_command("make", relative_to="sourceroot")
-        command = shlex.split(make)
+        command = self.get_tool_command("make", relative_to="sourceroot")
         command.extend(["-f", "Makefile.metapkg"])
         tools.cmd(
             *command,
@@ -399,21 +385,16 @@ class Build(targets.Build):
 
     def _list_installed_files(self) -> list[pathlib.Path]:
         image_root = self.get_image_root(relative_to="sourceroot")
-        find = self.sh_get_command("find", relative_to="sourceroot")
-        listing = (
-            tools.cmd(
-                find,
-                image_root,
-                "-type",
-                "f",
-                "-o",
-                "-type",
-                "l",
-                cwd=str(self._srcroot),
-            )
-            .strip()
-            .split("\n")
-        )
+        find = self.get_tool_command("find", relative_to="sourceroot")
+        find += [
+            str(image_root),
+            "-type",
+            "f",
+            "-o",
+            "-type",
+            "l",
+        ]
+        listing = tools.cmd(*find, cwd=str(self._srcroot)).strip().split("\n")
         return [
             pathlib.Path(entry).relative_to(image_root) for entry in listing
         ]

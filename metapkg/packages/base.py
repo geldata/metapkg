@@ -193,9 +193,18 @@ class BasePackage(PackageWithPrettyVersion):
     def get_build_script(self, build: targets.Build) -> str:
         raise NotImplementedError(f"{self}.build()")
 
-    def get_build_env(self, build: targets.Build, wd: str) -> Args:
+    def get_ld_env(
+        self,
+        build: targets.Build,
+        wd: str | None,
+        extra: Iterable[str] = (),
+    ) -> Args:
         all_build_deps = build.get_build_reqs(self, recursive=True)
-        return build.get_ld_env(all_build_deps, wd=wd)
+        return build.sh_get_ld_env(all_build_deps, wd=wd, extra=extra)
+
+    def get_build_env(self, build: targets.Build, wd: str | None) -> Args:
+        global_env = build.sh_append_global_flags({})
+        return global_env | self.get_ld_env(build, wd=wd)
 
     def get_build_install_script(self, build: targets.Build) -> str:
         script = ""
@@ -1480,13 +1489,10 @@ class BundledCPackage(BuildSystemMakePackage):
         build: targets.Build,
         wd: str | None = None,
     ) -> Args:
-        env_args: Args = {}
+        env_args = dict(self.get_build_env(build, wd))
         build.sh_append_run_time_ldflags(env_args, self)
         build.sh_append_link_time_ldflags(env_args, self, wd=wd)
-        all_build_deps = build.get_build_reqs(self, recursive=True)
-        return build.sh_append_global_flags(env_args) | build.get_ld_env(
-            all_build_deps, wd=wd
-        )
+        return env_args
 
     def get_configure_script(self, build: targets.Build) -> str:
         script = super().get_configure_script(build)
@@ -1869,13 +1875,15 @@ class BundledCMakePackage(BundledCPackage):
         else:
             generator = "Ninja"
 
-        return {
+        args: Args = {
             "-Cmetapkg_common_config.cmake": None,
             f"-G{generator}": None,
             "-DCMAKE_BUILD_TYPE": "metapkg",
             "-DCMAKE_VERBOSE_MAKEFILE": "ON",
             "-DCMAKE_POLICY_DEFAULT_CMP0144": "NEW",
         }
+
+        return args
 
     def get_configure_env(
         self,

@@ -21,16 +21,21 @@ from metapkg import tools
 class Build(targets.Build):
     _target: targets.LinuxDistroTarget
 
-    def prepare(self) -> None:
-        super().prepare()
-
-        self._pkgroot = self._droot / self._root_pkg.name_slot
-        self._srcroot = self._pkgroot / self._root_pkg.name_slot
-
+    def __init__(
+        self,
+        target: targets.Target,
+        request: targets.BuildRequest,
+    ) -> None:
+        super().__init__(target, request)
+        self._pkgroot = self._droot / self._root_pkg.name
+        self._srcroot = self._pkgroot / self._root_pkg.name
         self._sourceroot = pathlib.Path("BUILD")
         self._buildroot = pathlib.Path("BUILD2")
         self._tmproot = pathlib.Path("TEMP")
         self._installroot = pathlib.Path("INSTALL")
+
+    def prepare(self) -> None:
+        super().prepare()
         self._bin_shims = self._root_pkg.get_bin_shims(self)
 
     def get_source_abspath(self) -> pathlib.Path:
@@ -168,7 +173,6 @@ class Build(targets.Build):
         return f"{rp.name}_{rp.version.text}.orig-{package.name}{{part}}.tar{{comp}}"
 
     def build(self) -> None:
-        self.prepare_tools()
         self.prepare_tarballs()
         self.unpack_sources()
         self.prepare_patches()
@@ -324,6 +328,7 @@ class Build(targets.Build):
             {patch_script}
 
             %build
+            {env}
             {build_script}
 
             %install
@@ -362,13 +367,17 @@ class Build(targets.Build):
             unpack_script=self._write_script(
                 "unpack", relative_to="buildroot"
             ),
-            build_script=self._write_script(
-                "complete", relative_to="buildroot"
+            env="\n".join(
+                f"export {var}={val}"
+                for var, val in self.get_global_make_vars("shell").items()
+            ),
+            build_script=self._write_build_script(
+                relative_to="buildroot", expr_flavor="shell"
             ),
             install_script=self._write_script(
                 "install", installable_only=True, relative_to="buildroot"
             ),
-            install_extras=textwrap.indent(self._get_install_extras(), "\t"),
+            install_extras=self._get_install_extras(),
             files_extras=self._get_files_extras(),
             pre_script=self.get_script(
                 "before_install",
