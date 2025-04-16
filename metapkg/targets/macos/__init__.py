@@ -294,6 +294,7 @@ class MacOSTarget(generic.GenericTarget):
             "cmake",
             "ninja",
             "meson",
+            "sccache",
         ]
 
     def prepare(self) -> None:
@@ -461,8 +462,12 @@ class MacOSTarget(generic.GenericTarget):
     ) -> list[str]:
         return []
 
-    def get_global_env(self, build: targets.Build) -> dict[str, str]:
-        return super().get_global_env(build) | {
+    def get_global_make_vars(
+        self,
+        build: targets.Build,
+        flavor: targets.ExprFlavor,
+    ) -> dict[str, str]:
+        return super().get_global_make_vars(build, flavor) | {
             "MACOSX_DEPLOYMENT_TARGET": self.min_supported_version,
         }
 

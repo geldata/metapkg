@@ -20,20 +20,24 @@ from metapkg import tools
 class Build(targets.Build):
     _target: targets.LinuxDistroTarget
 
-    def prepare(self) -> None:
-        super().prepare()
-
-        self._pkgroot = self._droot / self._root_pkg.name_slot
-        self._srcroot = self._pkgroot / self._root_pkg.name_slot
+    def __init__(
+        self,
+        target: targets.Target,
+        request: targets.BuildRequest,
+    ) -> None:
+        super().__init__(target, request)
+        self._pkgroot = self._droot / self._root_pkg.name
+        self._srcroot = self._pkgroot / self._root_pkg.name
         self._debroot = self._srcroot / "debian"
         self._artifactroot = pathlib.Path("_artifacts")
         self._buildroot = self._artifactroot / "build"
         self._tmproot = self._artifactroot / "tmp"
         self._installroot = self._artifactroot / "install"
 
-        self._debroot.mkdir(parents=True)
-        (self._debroot / self._tmproot).mkdir(parents=True)
-
+    def prepare(self) -> None:
+        super().prepare()
+        self._debroot.mkdir(parents=True, exist_ok=True)
+        (self._debroot / self._tmproot).mkdir(parents=True, exist_ok=True)
         self._bin_shims = self._root_pkg.get_bin_shims(self)
 
     def get_source_abspath(self) -> pathlib.Path:
@@ -168,7 +172,6 @@ class Build(targets.Build):
         return packages.pep440_to_semver(self._root_pkg.version)
 
     def build(self) -> None:
-        self.prepare_tools()
         self.prepare_tarballs()
         self.unpack_sources()
         if not isinstance(self._root_pkg, packages.PrePackagedPackage):
@@ -424,7 +427,7 @@ class Build(targets.Build):
 
             include /usr/share/dpkg/architecture.mk
 
-            {target_global_rules}
+            {env}
 
             DPKG_EXPORT_BUILDFLAGS = 1
             include /usr/share/dpkg/buildflags.mk
@@ -459,7 +462,7 @@ class Build(targets.Build):
             \t{strip_steps}
 
             override_dh_install-arch:
-            {install_steps}
+            \t{install_steps}
 
             override_dh_auto_clean:
             \trm -rf stamp
@@ -472,10 +475,7 @@ class Build(targets.Build):
         """
         ).format(
             name=self._root_pkg.name_slot,
-            target_global_rules=(
-                self._target.get_global_rules()  # type: ignore
-            ),
-            build_steps=self._write_script("complete"),
+            build_steps=self._write_build_script(expr_flavor="make"),
             install_extras=textwrap.indent(self._get_install_extras(), "\t"),
             install_steps=self._write_script("install", installable_only=True),
             strip_steps=(
@@ -484,6 +484,10 @@ class Build(targets.Build):
                 else "dh_strip --no-automatic-dbgsym"
             ),
             shlib_paths=shlib_paths_opt,
+            env="\n".join(
+                f"export {var} := {val}"
+                for var, val in self.get_global_make_vars("make").items()
+            ),
         )
 
         with open(self._debroot / "rules", "w") as f:

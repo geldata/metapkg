@@ -5,6 +5,7 @@ import os.path
 import pathlib
 
 from metapkg import tools
+from metapkg import targets
 from metapkg.targets import generic
 
 
@@ -12,10 +13,13 @@ class GenericLinuxBuild(generic.Build):
     def get_tool_list(self) -> list[str]:
         tools = super().get_tool_list()
         tools.append("linux-static-linkdriver-wrapper.sh")
+        tools.append("sccache-wrapper.sh")
         return tools
 
-    def _get_global_env_vars(self) -> dict[str, str]:
-        env = super()._get_global_env_vars()
+    def get_global_make_vars(
+        self, flavor: targets.ExprFlavor
+    ) -> dict[str, str]:
+        env = super().get_global_make_vars(flavor)
 
         wrapper = self.sh_get_command(
             "linux-static-linkdriver-wrapper",
@@ -23,7 +27,8 @@ class GenericLinuxBuild(generic.Build):
         )
 
         target = self.target.triple.upper().replace("-", "_")
-        env[f"CARGO_TARGET_{target}_LINKER"] = f"$(ROOT)/{wrapper}"
+        ROOT = "$(ROOT)" if flavor == "make" else "${ROOT}"
+        env[f"CARGO_TARGET_{target}_LINKER"] = f"{ROOT}/{wrapper}"
 
         return env
 
