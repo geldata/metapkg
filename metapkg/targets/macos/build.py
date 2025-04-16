@@ -25,6 +25,11 @@ class MacOSBuild(generic.Build):
         self._system_tools["cmake"] = self._find_tool("cmake")
         self._system_tools["ninja"] = self._find_tool("ninja")
 
+    def get_tool_list(self) -> list[str]:
+        tools = super().get_tool_list()
+        tools.append("sccache-wrapper.sh")
+        return tools
+
     def _find_tool(self, tool: str) -> str:
         tool_path = shutil.which(tool)
         if tool_path is None:

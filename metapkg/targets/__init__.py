@@ -6,6 +6,7 @@ import platform
 from .base import (
     Build,
     BuildRequest,
+    ExprFlavor,
     InstallAspect,
     Target,
     Location,
@@ -25,6 +26,7 @@ if TYPE_CHECKING:
 __all__ = (
     "Build",
     "BuildRequest",
+    "ExprFlavor",
     "EnsureDirAction",
     "AddUserAction",
     "InstallAspect",

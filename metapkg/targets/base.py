@@ -66,6 +66,11 @@ InstallAspect = Literal[
     "userconf",
 ]
 
+ExprFlavor = Literal[
+    "make",
+    "shell",
+]
+
 
 class TargetAction:
     def __init__(self, build: Build) -> None:
@@ -86,6 +91,7 @@ class BuildRequest(NamedTuple):
     revision: str = "1"
     subdist: str | None = None
     extra_opt: bool = False
+    enable_sccache: bool = False
     jobs: int = 1
     compression: list[str] = ["gzip", "zstd"]
 
@@ -194,8 +200,49 @@ class Target:
     def get_global_cflags(self, build: Build) -> list[str]:
         return []
 
-    def get_global_env(self, build: Build) -> dict[str, str]:
-        return {}
+    def get_global_make_vars(
+        self, build: Build, flavor: ExprFlavor
+    ) -> dict[str, str]:
+        if flavor == "make":
+            clean_path = (
+                '$(shell echo "$$PATH" | tr ":" "\\n" '
+                '| grep -v "/s\\?ccache" | paste -s -d: -)'
+            )
+        else:
+            clean_path = (
+                '$(echo "$PATH" | tr ":" "\\n" '
+                '| grep -v "/s\\?ccache" | paste -s -d: -)'
+            )
+
+        env: dict[str, str] = {
+            # We use sccache when available, make sure
+            # ccache does not get used unintendedly.
+            "CCACHE_DISABLE": "true",
+            "PATH": clean_path,
+        }
+
+        if build.is_sccache_enabled:
+            real_sccache = build.sh_get_command(
+                "sccache",
+                system_only=True,
+                shell_quote=(flavor == "shell"),
+            )
+            possibly_wrapped_sccache = build.sh_get_command(
+                "sccache",
+                shell_quote=(flavor == "shell"),
+            )
+            ROOT = "$(ROOT)" if flavor == "make" else '"${ROOT}"'
+            link_dir = str(
+                build.get_sccache_link_dir(relative_to="sourceroot")
+            )
+            if flavor == "shell":
+                link_dir = shlex.quote(link_dir)
+            env = env | {
+                "SCCACHE": real_sccache,
+                "PATH": f"{ROOT}{os.sep}{link_dir}{os.pathsep}{clean_path}",
+                "RUSTC_WRAPPER": possibly_wrapped_sccache,
+            }
+        return env
 
     def get_global_cxxflags(self, build: Build) -> list[str]:
         return self.get_global_cflags(build)
@@ -317,6 +364,14 @@ class PosixEnsureDirAction(EnsureDirAction):
 
 
 class PosixTarget(Target):
+    def get_global_make_vars(
+        self, build: Build, flavor: ExprFlavor
+    ) -> dict[str, str]:
+        env = super().get_global_make_vars(build, flavor) | {
+            "SHELL": "/usr/bin/env bash",
+        }
+        return env
+
     def get_action(self, name: str, build: Build) -> TargetAction:
         if name == "ensuredir":
             return PosixEnsureDirAction(build)
@@ -443,6 +498,16 @@ class LinuxTarget(PosixTarget):
             return LinuxAddUserAction(build)
         else:
             return super().get_action(name, build)
+
+    def get_global_make_vars(
+        self, build: Build, flavor: ExprFlavor
+    ) -> dict[str, str]:
+        env = super().get_global_make_vars(build, flavor)
+        if build.is_sccache_enabled:
+            sock = "metapkg-sccache.sock"
+            sock = f"\\x00{sock}" if flavor == "make" else f"\\\\x00{sock}"
+            env = env | {"SCCACHE_SERVER_UDS": sock}
+        return env
 
     def get_su_script(self, build: Build, script: str, user: str) -> str:
         return f"su '{user}' -c {shlex.quote(script)}\n"
@@ -733,6 +798,7 @@ class Build:
         self._revision = request.revision
         self._subdist = request.subdist
         self._extra_opt = request.extra_opt
+        self._enable_sccache = request.enable_sccache
         self._jobs = request.jobs
         if self._jobs == 0:
             self._jobs = os.cpu_count() or 1
@@ -750,7 +816,9 @@ class Build:
         ]
         self._tools: dict[str, pathlib.Path] = {}
         self._common_tools: dict[str, pathlib.Path] = {}
-        self._system_tools: dict[str, str] = {}
+        self._path_tools: dict[str, str] = {}
+        self._system_tools: dict[str, str | list[str]] = {}
+        self._real_sccache_path: pathlib.Path | None = None
         self._tarballs: dict[
             mpkg_base.BasePackage,
             list[tuple[mpkg_sources.BaseSource, pathlib.Path]],
@@ -795,6 +863,13 @@ class Build:
     @property
     def is_debug_build(self) -> bool:
         return self._build_debug
+
+    @property
+    def is_sccache_enabled(self) -> bool:
+        return self._enable_sccache
+
+    def get_global_make_vars(self, flavor: ExprFlavor) -> dict[str, str]:
+        return self.target.get_global_make_vars(self, flavor)
 
     def get_source_abspath(self) -> pathlib.Path:
         raise NotImplementedError
@@ -923,7 +998,7 @@ class Build:
         self._system_tools["make"] = "make"
         self._system_tools["cp"] = "cp"
         self._system_tools["cargo"] = "cargo"
-        self._system_tools["python"] = "/usr/bin/env python3"
+        self._system_tools["python"] = ["/usr/bin/env", "python3"]
         self._system_tools["install"] = "install"
         self._system_tools["patch"] = "patch"
         self._system_tools["useradd"] = "useradd"
@@ -935,9 +1010,111 @@ class Build:
         self._system_tools["meson"] = "meson"
         self._system_tools["cmake"] = "cmake"
         self._system_tools["ninja"] = "ninja"
+        if self.is_sccache_enabled:
+            self._find_sccache()
+
+    def _find_sccache(self) -> None:
+        # Populate a directory under <helpers_root> with
+        # various C compiler hardlinks to sccache.
+        sccache = os.environ.get("SCCACHE")
+        if sccache:
+            if not pathlib.Path(sccache).is_file():
+                self._enable_sccache = False
+                self._io.write_line(
+                    f"<warning>Path to sccache set in the SCCACHE environment "
+                    f"variable ('{sccache}') is invalid: file does not exist. "
+                    f"Build cache will not be enabled."
+                )
+                return
+        else:
+            sccache = shutil.which("sccache")
+            if not sccache:
+                self._enable_sccache = False
+                self._io.write_line(
+                    "<warning>sccache is requested to be enabled but "
+                    "sccache could not be found in PATH. "
+                    "Build cache will not be enabled."
+                )
+                return
+
+        self._real_sccache_path = pathlib.Path(sccache)
+        self._system_tools["sccache"] = sccache
 
     def prepare(self) -> None:
         self.define_tools()
+        self.prepare_tools()
+        if self._enable_sccache:
+            self._configure_sccache()
+
+    def _configure_sccache(self) -> None:
+        sccache_bin = self._real_sccache_path
+        assert sccache_bin is not None
+
+        link_dir = self.get_sccache_link_dir(relative_to="fsroot")
+        link_dir.mkdir(parents=True, exist_ok=True)
+
+        wrapper = self.get_local_tool_path(
+            "sccache-wrapper",
+            relative_to="helpers",
+        )
+        if wrapper is None:
+            raise RuntimeError("sscache-wrapper helper is missing")
+        sccache_bin = pathlib.Path("..") / wrapper
+
+        def _link(cc: str, check_path: bool = True) -> bool:
+            if check_path and not shutil.which(cc):
+                return True
+            try:
+                (link_dir / cc).symlink_to(sccache_bin)
+            except OSError:
+                self._enable_sccache = False
+                self._io.write_line(
+                    f"<warning>could not create a symlink from "
+                    f"{link_dir / cc} to {sccache_bin}. "
+                    "Build cache will not be enabled."
+                )
+                return False
+            else:
+                return True
+
+        # Link sccache itself for recursion checks.
+        _link("sccache", check_path=False)
+        # Make sure everything uses the wrapped ccache.
+        self._path_tools["sccache"] = "sccache"
+
+        for cc in ["c++", "c99", "cc", "clang", "clang++", "gcc", "g++"]:
+            if not _link(cc):
+                return
+
+        def _link_qual_cc(ccs: list[str]) -> bool:
+            cc = ccs[0]
+            if not shutil.which(cc):
+                return True
+
+            try:
+                gcc_mach = tools.cmd(
+                    cc, "-dumpmachine", errors_are_fatal=False
+                )
+            except subprocess.CalledProcessError:
+                self._io.write_line(
+                    f"<warning>`{cc} -dumpmachine` returned an error. "
+                    "This is probably not good. "
+                    "Build cache will not be enabled."
+                )
+                return False
+            else:
+                for cc in ccs:
+                    qual_cc = f"{gcc_mach}-{cc}"
+                    if not _link(qual_cc):
+                        return False
+
+            return True
+
+        if not _link_qual_cc(["gcc", "g++"]):
+            return
+
+        if not _link_qual_cc(["clang", "clang++"]):
+            return
 
     def build(self) -> None:
         raise NotImplementedError
@@ -962,17 +1139,19 @@ class Build:
         pkg_ver = mpkg_base.pep440_to_semver(pkg.version)
         tgt_ident = self.target.ident
         tarball = f"{pkg_name}__{pkg_ver}__{tgt_ident}.tar"
-        tar = self.sh_get_command("tar")
+        tar = self.get_tool_command("tar")
         intermediates = self.get_intermediate_output_dir(relative_to="fsroot")
         shipment = str(self.get_temp_root(relative_to="fsroot") / tarball)
         tools.cmd(
-            tar,
-            "--transform",
-            "flags=r;s|^\\./||",
-            "-c",
-            "-f",
-            os.path.relpath(shipment, start=intermediates),
-            ".",
+            *tar,
+            *[
+                "--transform",
+                "flags=r;s|^\\./||",
+                "-c",
+                "-f",
+                os.path.relpath(shipment, start=intermediates),
+                ".",
+            ],
             cwd=intermediates,
         )
         shutil.copy2(shipment, self._outputroot)
@@ -989,6 +1168,9 @@ class Build:
             absolute_path.mkdir(parents=True)
 
         return self.get_path(path, relative_to=relative_to, package=package)
+
+    def get_sccache_link_dir(self, relative_to: Location) -> pathlib.Path:
+        return self.get_helpers_root(relative_to=relative_to) / "sccache"
 
     def get_build_install_dir(
         self,
@@ -1156,6 +1338,55 @@ class Build:
     def get_exe_suffix(self) -> str:
         return self._target.get_exe_suffix()
 
+    def get_local_tool_path(
+        self,
+        tool: str,
+        *,
+        relative_to: Location = "pkgbuild",
+        package: mpkg_base.BasePackage | None = None,
+    ) -> pathlib.Path | None:
+        path = self._tools.get(tool)
+        if not path:
+            path = self._common_tools.get(tool)
+        if path:
+            return self.get_path(
+                path, package=package, relative_to=relative_to
+            )
+        else:
+            return None
+
+    def get_tool_command(
+        self,
+        tool: str,
+        *,
+        relative_to: Location = "pkgbuild",
+        package: mpkg_base.BasePackage | None = None,
+        system_only: bool = False,
+    ) -> list[str]:
+        path = None
+        if not system_only:
+            path = self._tools.get(tool)
+            if not path:
+                path = self._common_tools.get(tool)
+
+            if path:
+                path = self.get_path(
+                    path, package=package, relative_to=relative_to
+                )
+                return [str(path)]
+
+            path_tool = self._path_tools.get(tool)
+            if path_tool:
+                return [path_tool]
+
+        system_tool = self._system_tools.get(tool)
+        if not system_tool:
+            raise RuntimeError(f"unrecognized tool: {tool}")
+        if isinstance(system_tool, list):
+            return system_tool
+        else:
+            return [system_tool]
+
     def sh_get_command(
         self,
         command: str,
@@ -1166,29 +1397,22 @@ class Build:
         force_args_eq: bool = False,
         linebreaks: bool = True,
         system_only: bool = False,
+        shell_quote: bool = True,
     ) -> str:
-        path = None
-        if not system_only:
-            path = self._tools.get(command)
-            if not path:
-                path = self._common_tools.get(command)
+        words = self.get_tool_command(
+            command,
+            package=package,
+            relative_to=relative_to,
+            system_only=system_only,
+        )
 
-        if not path:
-            # This is an unclaimed command.  Assume system executable.
-            system_tool = self._system_tools.get(command)
-            if not system_tool:
-                raise RuntimeError(f"unrecognized command: {command}")
-
-            # System tools are already properly quoted shell commands.
-            cmd = system_tool
-
-        else:
-            rel_path = self.get_path(
-                path, package=package, relative_to=relative_to
-            )
-            cmd = shlex.quote(str(rel_path))
-
+        cmd = self.sh_format_flags(words) if shell_quote else " ".join(words)
         if args is not None:
+            if not shell_quote:
+                raise AssertionError(
+                    "sh_get_command: shell_quote = False "
+                    "is not safe with args"
+                )
             cmd = self.sh_append_args(
                 cmd, args, force_args_eq=force_args_eq, linebreaks=linebreaks
             )
@@ -1322,14 +1546,14 @@ class Build:
         helper_path_relative_to: Location | None = None,
         system_only: bool = False,
     ) -> str:
-        python = self.sh_get_command(
-            "python", relative_to=relative_to, system_only=system_only
+        python = self.get_tool_command(
+            "python",
+            relative_to=relative_to,
+            system_only=system_only,
         )
-        if python.startswith("/usr/bin/env"):
-            shebang = python
-        else:
-            shebang = f"/usr/bin/env {python}"
-        text = f"#!{shebang}" + "\n\n" + text
+        if python[0] != "/usr/bin/env":
+            python = ["/usr/bin/env"] + python
+        text = f"#!{' '.join(python)}" + "\n\n" + text
         if helper_path_relative_to is None:
             helper_path_relative_to = relative_to
         return self.sh_write_helper(
@@ -1565,7 +1789,37 @@ class Build:
             f"_{stage}.sh", script, relative_to=relative_to
         )
 
-        return f"\t{helper}"
+        return helper
+
+    def _write_build_script(
+        self,
+        *,
+        expr_flavor: ExprFlavor,
+        relative_to: Location = "sourceroot",
+    ) -> str:
+        build_script = self._write_script("complete", relative_to=relative_to)
+        if self.is_sccache_enabled:
+            if expr_flavor == "make":
+                build_script = (
+                    "+$(SCCACHE) --start-server\n"
+                    + f"{build_script} || status=$$?; "
+                    + "$(SCCACHE) --stop-server; "
+                    + "if [ $${status:=0} -ne 0 ]; then exit $$status; fi"
+                )
+            elif expr_flavor == "shell":
+                build_script = (
+                    "${SCCACHE} --start-server\n"
+                    + f"{build_script} || status=$?; "
+                    + "${SCCACHE} --stop-server; "
+                    + "if [ ${status:=0} -ne 0 ]; then exit $status; fi"
+                )
+            else:
+                raise AssertionError(f"unhandled ExprFlavor: {expr_flavor}")
+
+        if expr_flavor == "make":
+            build_script = textwrap.indent(build_script, prefix="\t")
+
+        return build_script
 
     def get_script(
         self,
@@ -1679,7 +1933,7 @@ class Build:
 
         return script
 
-    def get_ld_env(
+    def sh_get_ld_env(
         self,
         deps: Iterable[mpkg_base.BasePackage],
         wd: str | None = None,
@@ -1995,16 +2249,15 @@ class Build:
 
     def sh_append_global_flags(
         self,
-        args: Mapping[str, str | pathlib.Path | None] | None = None,
+        args: mpkg_base.Args | None = None,
     ) -> dict[str, str | pathlib.Path | None]:
         global_cflags = self.target.get_global_cflags(self)
         global_cxxflags = self.target.get_global_cxxflags(self)
         global_ldflags = self.target.get_global_ldflags(self)
         if args is None:
-            args = {}
-        conf_args = dict(args)
-        for k, v in self.target.get_global_env(self).items():
-            self.sh_replace_flags(conf_args, k, [v])
+            conf_args = {}
+        else:
+            conf_args = dict(args)
         if global_cflags:
             self.sh_append_flags(conf_args, "CFLAGS", global_cflags)
         if global_cxxflags:
