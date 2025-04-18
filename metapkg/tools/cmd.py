@@ -6,6 +6,8 @@ import os
 import subprocess
 import sys
 
+from metapkg.exceptions import MetapkgRuntimeError
+
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +16,7 @@ def cmd(
     *cmd: str | os.PathLike[str],
     errors_are_fatal: bool = True,
     hide_stderr: bool = False,
+    error_context: str | None = None,
     **kwargs: Any,
 ) -> str:
     default_kwargs: dict[str, Any] = {
@@ -31,13 +34,10 @@ def cmd(
         p = subprocess.run(str_cmd, text=True, check=True, **default_kwargs)
     except subprocess.CalledProcessError as e:
         if errors_are_fatal:
-            if e.stdout:
-                logger.error(e.stdout)
-            if e.stderr:
-                logger.error(e.stderr)
-            msg = "{} failed with exit code {}".format(cmd_line, e.returncode)
-            logger.error(msg)
-            sys.exit(1)
+            raise MetapkgRuntimeError.create(
+                reason=error_context or f"{cmd[0]} failed",
+                exception=e,
+            )
         else:
             raise
     else:
