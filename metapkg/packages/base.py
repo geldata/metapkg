@@ -658,22 +658,15 @@ class BundledPackage(BasePackage):
             return None
 
     @classmethod
-    def resolve_vcs_source(
-        cls, io: cleo_io.IO, *, ref: str | None = None
-    ) -> pathlib.Path:
-        source = cls.get_vcs_source(io, ref)
-        if source is None:
-            raise ValueError("Unable to resolve non-git bundled package")
-        return source.download(io)
-
-    @classmethod
     def resolve_vcs_repo(
         cls,
         io: cleo_io.IO,
         version: str | None = None,
-    ) -> tools.git.Git:
-        repo_dir = cls.resolve_vcs_source(io, ref=version)
-        return tools.git.Git(repo_dir)
+    ) -> tools.git.GitClone:
+        source = cls.get_vcs_source(io, ref=version)
+        if source is None:
+            raise ValueError("Unable to resolve non-git bundled package")
+        return source.download(io)
 
     @classmethod
     def get_next_feature_version(
@@ -743,11 +736,10 @@ class BundledPackage(BasePackage):
         if vcs_source is not None:
             sources[0] = vcs_source
             repo = cls.resolve_vcs_repo(io, version)
-            if version:
-                vcs_version = cls.to_vcs_version(version)
-            else:
-                vcs_version = None
-            source_version = repo.peel_ref(vcs_version or "HEAD")
+            vcs_version = cls.to_vcs_version(version) if version else "HEAD"
+            source_version = repo.resolve_local_rev(vcs_version)
+            if source_version is None:
+                raise ValueError(f"could not resolve {vcs_version}")
             version = cls.version_from_vcs_version(
                 io, repo, source_version, is_release
             )
