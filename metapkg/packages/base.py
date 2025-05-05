@@ -753,8 +753,8 @@ class BundledPackage(BasePackage):
             )
 
             git_date = repo.run(
-                "show",
-                "-s",
+                "log",
+                "-1",
                 "--format=%cd",
                 "--date=format-local:%Y%m%d%H",
                 source_version,
