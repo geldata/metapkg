@@ -100,7 +100,7 @@ class Git(core_git.Git):
             # The name can be a branch or tag, so we attempt to look it up
             # with ls-remote. If we don't find anything, we assume it's a
             # commit hash.
-            assert '/' not in ref, f"expect commit hash, got: {ref!r}"
+            assert "/" not in ref, f"expect commit hash, got: {ref!r}"
             rev = ref
 
         return rev
