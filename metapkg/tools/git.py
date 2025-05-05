@@ -67,10 +67,15 @@ class Git(core_git.Git):
                 sha, name = line.strip().split("\t")
                 sha_map[name] = sha
 
-            # Try peeled tag (refs/tags/<ref>^{})
-            peeled_tag = f"refs/tags/{ref}^{{}}"
-            if peeled_tag in sha_map:
-                rev = sha_map[peeled_tag]
+            if ref in sha_map:
+                # Try if `ref` starts with `ref/*/` already
+                rev = sha_map[ref]
+
+            if rev is None:
+                # Try peeled tag (refs/tags/<ref>^{})
+                peeled_tag = f"refs/tags/{ref}^{{}}"
+                if peeled_tag in sha_map:
+                    rev = sha_map[peeled_tag]
 
             if rev is None:
                 # Try direct tag (refs/tags/<ref>)
@@ -95,6 +100,7 @@ class Git(core_git.Git):
             # The name can be a branch or tag, so we attempt to look it up
             # with ls-remote. If we don't find anything, we assume it's a
             # commit hash.
+            assert '/' not in ref, f"expect commit hash, got: {ref!r}"
             rev = ref
 
         return rev
