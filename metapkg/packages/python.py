@@ -671,7 +671,7 @@ class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
             name=name,
             pretty_version=pretty_version,
             requires=requires,
-            source_version=repo.rev_parse("HEAD"),
+            source_version=repo.head,
         )
         package.dist_name = base.canonicalize_name(dist.name)
         repository.set_build_requirements(

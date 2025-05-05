@@ -338,7 +338,7 @@ class GitSource(BaseSource):
         *,
         vcs_version: str | None = None,
         exclude_submodules: Iterable[str] | None = None,
-        clone_depth: int = 0,
+        clone_depth: int | None = None,
         include_gitdir: bool = False,
         force_archive: Iterable[str] | None = None,
     ) -> None:
@@ -354,15 +354,19 @@ class GitSource(BaseSource):
             self.force_archive = frozenset()
         self.clone_depth = clone_depth
         self.include_gitdir = include_gitdir
+        self._clone: tools.git.GitClone | None = None
 
-    def download(self, io: cleo_io.IO) -> pathlib.Path:
-        return tools.git.update_repo(
-            self.url,
-            exclude_submodules=self.exclude_submodules,
-            clone_depth=self.clone_depth,
-            clean_checkout=os.environ.get("METAPKG_GIT_CACHE") == "disabled",
-            ref=self.ref,
-        )
+    def download(self, io: cleo_io.IO) -> tools.git.GitClone:
+        if self._clone is None:
+            self._clone = tools.git.clone_repo(
+                self.url,
+                remote_ref=self.ref,
+                clean_checkout=os.environ.get("METAPKG_GIT_CACHE")
+                == "disabled",
+                exclude_submodules=self.exclude_submodules,
+                clone_depth=self.clone_depth,
+            )
+        return self._clone
 
     def copy(
         self,
@@ -370,8 +374,7 @@ class GitSource(BaseSource):
         *,
         io: cleo_io.IO,
     ) -> None:
-        self.download(io)
-        repo = tools.git.repo(self.url)
+        repo = self.download(io)
         repo.run(
             "checkout-index",
             "-a",
@@ -389,8 +392,7 @@ class GitSource(BaseSource):
         build: targets.Build,
         part: str = "",
     ) -> pathlib.Path:
-        self.download(io)
-        repo = tools.git.repo(self.url)
+        repo = self.download(io)
         if name_tpl is None:
             name_tpl = f"{pkg.unique_name}{{part}}.tar{{comp}}"
         target_path = target_dir / name_tpl.format(part=part, comp="")
@@ -403,45 +405,35 @@ class GitSource(BaseSource):
             "HEAD",
         )
 
-        submodules = repo.run("submodule", "foreach", "--recursive").strip(
-            "\n"
+        submodules = repo.run(
+            "submodule", "foreach", "--recursive", "echo $sm_path"
         )
-        if submodules:
-            for submodule in submodules.split("\n"):
-                path_m = re.match("Entering '([^']+)'", submodule)
-                if not path_m:
-                    raise ValueError(
-                        "cannot parse git submodule foreach output"
-                    )
-                path = path_m.group(1)
-                module_repo = tools.git.Git(repo.work_tree / path)
 
-                f = tempfile.NamedTemporaryFile(delete=False)
-                f.close()
-                try:
-                    module_repo.run(
-                        "archive",
-                        "--format=tar",
-                        f"--output={f.name}",
-                        f"--prefix={pkg.unique_name}/{path}/",
-                        "HEAD",
-                    )
-                    self._tar_append(pathlib.Path(f.name), target_path)
-                finally:
-                    os.unlink(f.name)
-
-        repo_dir = tools.git.repodir(self.url)
+        for path in submodules.splitlines():
+            module_repo = tools.git.Git(repo.work_tree / path)
+            f = tempfile.NamedTemporaryFile(delete=False)
+            f.close()
+            try:
+                module_repo.run(
+                    "archive",
+                    "--format=tar",
+                    f"--output={f.name}",
+                    f"--prefix={pkg.unique_name}/{path}/",
+                    "HEAD",
+                )
+                self._tar_append(pathlib.Path(f.name), target_path)
+            finally:
+                os.unlink(f.name)
 
         if self.include_gitdir:
-            repo_gitdir = repo_dir / ".git"
             prefix = f"{pkg.unique_name}/.git/"
             with tarfile.open(target_path, "a") as tf:
-                tf.add(repo_gitdir, prefix)
+                tf.add(repo.git_dir, prefix)
 
         if self.force_archive:
             with tarfile.open(target_path, "a") as tf:
                 for path in self.force_archive:
-                    repo_path = repo_dir / path
+                    repo_path = repo.work_dir / path
                     prefix = f"{pkg.unique_name}/{path}"
                     if prefix not in set(tf.getnames()):
                         tf.add(repo_path, prefix)
