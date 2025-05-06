@@ -318,17 +318,9 @@ class GitClone(Git):
         else:
             # It's a SHA or maybe a refspec, loop through remote refs
             # to find if any ref points to it.
-            found = None
             for name, rev in remote_refs.items():
                 if poetry_git.is_revision_sha(rev) and rev.startswith(ref):
-                    if found is not None:
-                        raise exceptions.MetapkgRuntimeError.create(
-                            f"ambiguous Git revision: "
-                            f"{ref} ({name} or {found})"
-                        )
-                    found = name
-            if found is not None:
-                return found
+                    return name
             else:
                 # No remote ref points to the requested revision,
                 # the caller would need to do something about it.
