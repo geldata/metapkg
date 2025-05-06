@@ -406,7 +406,7 @@ class GitSource(BaseSource):
         )
 
         submodules = repo.run(
-            "submodule", "foreach", "--recursive", "echo $sm_path"
+            "submodule", "foreach", "--quiet", "--recursive", "echo $sm_path"
         )
 
         for path in submodules.splitlines():
