@@ -410,6 +410,9 @@ class GitSource(BaseSource):
         )
 
         for path in submodules.splitlines():
+            path = path.strip()
+            if not path:
+                continue
             module_repo = tools.git.Git(repo.work_tree / path)
             f = tempfile.NamedTemporaryFile(delete=False)
             f.close()

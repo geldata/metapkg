@@ -28,7 +28,8 @@ def cmd(
 
     str_cmd = [str(c) for c in cmd]
     cmd_line = " ".join(str_cmd)
-    print(cmd_line, file=sys.stderr)
+    cwd = kwargs.get("cwd") or os.getcwd()
+    print(f"{cwd}> {cmd_line}", file=sys.stderr)
 
     try:
         p = subprocess.run(str_cmd, text=True, check=True, **default_kwargs)
