@@ -413,6 +413,7 @@ class GitSource(BaseSource):
             path = path.strip()
             if not path:
                 continue
+            io.write_line(f"<info>Archiving git submodule in {path}")
             module_repo = tools.git.Git(repo.work_tree / path)
             f = tempfile.NamedTemporaryFile(delete=False)
             f.close()
