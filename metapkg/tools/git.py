@@ -38,14 +38,13 @@ class Git(core_git.Git):
             raise GitError(f"git: could not initialize: {e}") from e
 
         self._work_dir = work_dir
-        head = self.resolve_local_rev("HEAD")
-        if head is None or not poetry_git.is_revision_sha(head):
-            raise GitError("git: HEAD does not point to a valid commit object")
-        self._head = head
 
     @property
     def head(self) -> str:
-        return self._head
+        head = self.resolve_local_rev("HEAD")
+        if head is None or not poetry_git.is_revision_sha(head):
+            raise GitError("git: HEAD does not point to a valid commit object")
+        return head
 
     @property
     def work_dir(self) -> pathlib.Path:
