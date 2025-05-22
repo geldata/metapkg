@@ -1,0 +1,24 @@
+name: Trigger Container Rebuild
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  trigger-container-build:
+    runs-on: ubuntu-latest
+    if: github.repository == 'geldata/metapkg'
+    permissions:
+      actions: write
+    steps:
+      - name: Trigger container rebuild in gel-pkg
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.actions.createWorkflowDispatch({
+              owner: "geldata",
+              repo: "gel-pkg",
+              workflow_id: "build-containers.yml",
+              ref: "main"
+            });
