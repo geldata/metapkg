@@ -273,6 +273,7 @@ class GitClone(Git):
     def _fetch_remote_refs(self) -> dict[str, str]:
         output = self.run(
             "ls-remote",
+            "--refs",
             "origin",
             "refs/tags/**",
             "refs/heads/**",
