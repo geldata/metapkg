@@ -233,6 +233,29 @@ class BasePackage(PackageWithPrettyVersion):
     def get_build_tools(self, build: targets.Build) -> dict[str, pathlib.Path]:
         return {}
 
+    def get_build_tools_path(
+        self,
+        build: targets.Build,
+        *,
+        relative_to: targets.Location = "pkgbuild",
+        relative_to_package: BasePackage | None = None,
+        wd: str | None = None,
+    ) -> str | None:
+        if wd is None:
+            wd = "$(pwd -P)"
+
+        rel_bin_path = self.get_install_path(build, "bin")
+        if rel_bin_path:
+            root_path = build.get_build_install_dir(
+                self,
+                relative_to=relative_to,
+                relative_to_package=relative_to_package,
+            )
+            bin_path = root_path / rel_bin_path.relative_to("/")
+            return f"{wd}/{shlex.quote(str(bin_path))}"
+        else:
+            return None
+
     def get_patches(
         self,
     ) -> dict[str, list[tuple[str, str]]]:

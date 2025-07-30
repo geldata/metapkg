@@ -117,9 +117,12 @@ class Build(targets.Build):
         package: packages.BasePackage,
         *,
         relative_to: targets.Location = "sourceroot",
+        relative_to_package: packages.BasePackage | None = None,
     ) -> pathlib.Path:
         return self.get_dir(
-            pathlib.Path(package.name), relative_to=relative_to
+            pathlib.Path(package.name),
+            relative_to=relative_to,
+            relative_to_package=relative_to_package,
         )
 
     def get_temp_dir(
@@ -127,9 +130,12 @@ class Build(targets.Build):
         package: packages.BasePackage,
         *,
         relative_to: targets.Location = "sourceroot",
+        relative_to_package: packages.BasePackage | None = None,
     ) -> pathlib.Path:
         return self.get_dir(
-            self._tmproot / package.name, relative_to=relative_to
+            self._tmproot / package.name,
+            relative_to=relative_to,
+            relative_to_package=relative_to_package,
         )
 
     def get_temp_root(
@@ -142,9 +148,12 @@ class Build(targets.Build):
         package: packages.BasePackage,
         *,
         relative_to: targets.Location = "sourceroot",
+        relative_to_package: packages.BasePackage | None = None,
     ) -> pathlib.Path:
         return self.get_dir(
-            self._buildroot / package.name, relative_to=relative_to
+            self._buildroot / package.name,
+            relative_to=relative_to,
+            relative_to_package=relative_to_package,
         )
 
     def get_build_install_dir(
@@ -157,7 +166,7 @@ class Build(targets.Build):
         return self.get_dir(
             self._installroot / package.name,
             relative_to=relative_to,
-            package=relative_to_package,
+            relative_to_package=relative_to_package,
         )
 
     def _get_tarball_tpl(self, package: packages.BasePackage) -> str:

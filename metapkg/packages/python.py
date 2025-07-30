@@ -521,7 +521,7 @@ class BasePythonPackage(base.BasePackage):
         return []
 
     def get_build_install_script(self, build: targets.Build) -> str:
-        common_script = super().get_build_install_script(build)
+        parts = [super().get_build_install_script(build)]
 
         python = build.sh_get_command("python", package=self)
         root = build.get_build_install_dir(self, relative_to="pkgbuild")
@@ -552,13 +552,57 @@ class BasePythonPackage(base.BasePackage):
                 {'--only-binary' if binary else '--no-binary'} :all: \\
                 --root "$(pwd -P)/{root}" \\
                 "{dist_name}"
-        """
+            """
         )
 
-        if common_script:
-            return f"{common_script}\n{wheel_install}"
+        parts.append(wheel_install)
+
+        bin_dir = self.get_install_path(build, "bin")
+        if bin_dir is not None:
+            rel_bin_dir = bin_dir.relative_to("/")
+            temp = build.get_temp_dir(self, relative_to="pkgbuild")
+            sed = build.sh_get_command("sed")
+            python = build.sh_get_command("python", relative_to="fsroot")
+            if python.startswith("/usr/bin/env"):
+                interpreter = python
+            else:
+                interpreter = f"/usr/bin/env {python}"
+            make_build_time_entrypoints = textwrap.dedent(
+                f"""\
+                    mkdir -p "{temp}"
+                    cp -a "{root}/{rel_bin_dir}" "{temp}/bin"
+                    {sed} -i '1s|^#!.*|#!{interpreter}|' "{temp}/bin/"*
+                """
+            )
+
+            parts.append(make_build_time_entrypoints)
+
+        return "\n".join(filter(None, parts))
+
+    def get_build_tools_path(
+        self,
+        build: targets.Build,
+        *,
+        relative_to: targets.Location = "pkgbuild",
+        relative_to_package: mpkg.BasePackage | None = None,
+        wd: str | None = None,
+    ) -> str | None:
+        if wd is None:
+            wd = "$(pwd -P)"
+
+        rel_bin_path = self.get_install_path(build, "bin")
+        if rel_bin_path:
+            temp = (
+                build.get_temp_dir(
+                    self,
+                    relative_to=relative_to,
+                    relative_to_package=relative_to_package,
+                )
+                / "bin"
+            )
+            return f"{wd}/{shlex.quote(str(temp))}"
         else:
-            return wheel_install
+            return None
 
     def get_install_list_script(self, build: targets.Build) -> str:
         common_script = super().get_install_list_script(build)

@@ -982,13 +982,15 @@ class Build:
         path: str | pathlib.Path,
         *,
         relative_to: Location,
-        package: mpkg_base.BasePackage | None = None,
+        relative_to_package: mpkg_base.BasePackage | None = None,
     ) -> pathlib.Path:
         absolute_path = (self.get_source_abspath() / path).resolve()
         if not absolute_path.exists():
             absolute_path.mkdir(parents=True)
 
-        return self.get_path(path, relative_to=relative_to, package=package)
+        return self.get_path(
+            path, relative_to=relative_to, package=relative_to_package
+        )
 
     def get_build_install_dir(
         self,
@@ -1125,6 +1127,7 @@ class Build:
         package: mpkg_base.BasePackage,
         *,
         relative_to: Location = "sourceroot",
+        relative_to_package: mpkg_base.BasePackage | None = None,
     ) -> pathlib.Path:
         raise NotImplementedError
 
@@ -1138,6 +1141,7 @@ class Build:
         package: mpkg_base.BasePackage,
         *,
         relative_to: Location = "sourceroot",
+        relative_to_package: mpkg_base.BasePackage | None = None,
     ) -> pathlib.Path:
         raise NotImplementedError
 
@@ -1952,26 +1956,18 @@ class Build:
     def sh_get_bundled_pkg_bin_path(
         self,
         pkg: mpkg_base.BasePackage,
+        *,
         relative_to: Location = "pkgbuild",
-        wd: str | None = None,
         relative_to_package: mpkg_base.BasePackage | None = None,
+        wd: str | None = None,
     ) -> str | None:
         assert self.is_bundled(pkg)
-
-        if wd is None:
-            wd = "$(pwd -P)"
-
-        rel_bin_path = pkg.get_install_path(self, "bin")
-        if rel_bin_path:
-            root_path = self.get_build_install_dir(
-                pkg,
-                relative_to=relative_to,
-                relative_to_package=relative_to_package,
-            )
-            bin_path = root_path / rel_bin_path.relative_to("/")
-            return f"{wd}/{shlex.quote(str(bin_path))}"
-        else:
-            return None
+        return pkg.get_build_tools_path(
+            self,
+            relative_to=relative_to,
+            relative_to_package=relative_to_package,
+            wd=wd,
+        )
 
     def sh_get_bundled_pkgs_bin_paths(
         self,
