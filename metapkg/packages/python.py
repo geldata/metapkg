@@ -154,6 +154,10 @@ class PyPiRepository(pypi_repository.PyPiRepository):
                 lambda: self._get_build_requires(package),
             )
 
+        build_reqs.extend(
+            dep.to_pep_508() for dep in package.get_build_requirements()
+        )
+
         if package.name == "pypkg-setuptools":
             build_reqs.append(wheel_dependency.to_pep_508())
 
@@ -288,8 +292,6 @@ def get_build_requires_from_srcdir(
 
         if dep.is_activated():
             deps.append(dep)
-
-    deps.extend(package.get_build_requirements())
 
     return deps
 
@@ -676,7 +678,8 @@ class BundledPythonPackage(BasePythonPackage, base.BundledPackage):
         package.dist_name = base.canonicalize_name(dist.name)
         repository.set_build_requirements(
             package,
-            get_build_requires_from_srcdir(package, repo_dir),
+            get_build_requires_from_srcdir(package, repo_dir)
+            + package.get_build_requirements(),
         )
 
         return package

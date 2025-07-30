@@ -122,7 +122,10 @@ class Provider(poetry_provider.Provider):
         if dependency.source_subdirectory:
             path = path.joinpath(dependency.source_subdirectory)
 
-        breqs = python.get_build_requires_from_srcdir(package, path)
+        breqs = (
+            python.get_build_requires_from_srcdir(package, path)
+            + package.get_build_requirements()
+        )
         set_build_requirements(package, breqs)
 
         package.source = mpkg_sources.source_for_url(f"file://{path}")
