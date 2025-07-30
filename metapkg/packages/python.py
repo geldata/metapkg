@@ -454,6 +454,14 @@ class BasePythonPackage(base.BasePackage):
             if cflags:
                 build.sh_append_quoted_flags(env, "CFLAGS", cflags)
 
+            for dep in build_deps:
+                build.sh_append_pkgconfig_paths(
+                    env,
+                    dep,
+                    wd="${_wd}",
+                    relative_to="pkgsource",
+                )
+
             ldflags = build.sh_get_bundled_pkgs_ldflags(
                 build_deps,
                 relative_to="pkgsource",
