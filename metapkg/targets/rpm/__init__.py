@@ -47,6 +47,8 @@ PACKAGE_MAP = {
     "libgeotiff-dev": "libgeotiff-devel",
     "libjson-c": "json-c",
     "libjson-c-dev": "json-c-devel",
+    "libjpeg": "libjpeg-turbo",
+    "libjpeg-dev": "libjpeg-turbo-devel",
     "libsqlite3": "sqlite-libs",
     "libsqlite3-dev": "sqlite-devel",
     "libtiff-dev": "libtiff-devel",
