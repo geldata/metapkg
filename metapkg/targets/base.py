@@ -762,6 +762,10 @@ class Build:
         return self._io
 
     @property
+    def env(self) -> poetry_env.Env:
+        return self._env
+
+    @property
     def stream(self) -> TextIO:
         output = self._io.output
         if TYPE_CHECKING:
