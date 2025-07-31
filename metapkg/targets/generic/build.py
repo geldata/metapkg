@@ -518,13 +518,13 @@ class Build(targets.Build):
                     rpath_list = ":".join(str(rpath) for rpath in rpaths)
                     if rpath_list:
                         raise AssertionError(
-                            f"{binary} links to {shlib} which is neither an"
-                            f" allowed system library, nor a bundled library"
-                            f" in rpath: {rpath_list}"
+                            f"{binary} links to {shlib_path} which is neither"
+                            f" an allowed system library, nor a bundled "
+                            f" library in rpath: {rpath_list}"
                         )
                     else:
                         raise AssertionError(
-                            f"{binary} links to {shlib} which is not an"
+                            f"{binary} links to {shlib_path} which is not an"
                             f" allowed system library, and {binary} does"
                             f" not define a library rpath"
                         )

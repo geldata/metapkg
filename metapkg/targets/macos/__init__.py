@@ -222,11 +222,13 @@ class ZlibSystemPackage(tgt_pkg.StandardSystemPackage):
 
 _frameworks_base = "/System/Library/Frameworks"
 _frameworks = [
+    "Accelerate",
     "CoreFoundation",
     "CoreServices",
     "IOKit",
     "Security",
     "SystemConfiguration",
+    "vecLib",
 ]
 
 _lib_base = "/usr/lib"
