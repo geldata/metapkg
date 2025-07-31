@@ -141,6 +141,13 @@ class PyPiRepository(pypi_repository.PyPiRepository):
             dep._pretty_name = f"pypkg-{dep.pretty_name}"
             package.add_dependency(dep)
 
+        for opt_deps in package.extras.values():
+            for dep in opt_deps:
+                dep._name = packaging.utils.canonicalize_name(
+                    f"pypkg-{dep.name}"
+                )
+                dep._pretty_name = f"pypkg-{dep.pretty_name}"
+
         package.add_dependency(python_dependency)
         for req in package.get_requirements():
             package.add_dependency(req)
