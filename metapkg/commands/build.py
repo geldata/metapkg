@@ -200,6 +200,7 @@ class Build(base.Command):
             )
             return 1
 
+        tempdir: tempfile.TemporaryDirectory[str] | None = None
         if keepwork:
             workdir = tempfile.mkdtemp(prefix="metapkg.")
         else:
@@ -233,7 +234,7 @@ class Build(base.Command):
                 ),
             )
         finally:
-            if not keepwork:
+            if tempdir is not None:
                 tempdir.cleanup()
 
         return 0
@@ -268,7 +269,7 @@ class Build(base.Command):
         )
 
         item_repo = root_pkg.get_package_repository(target, io=self.io)
-        if item_repo is not None and item_repo is not af_repo.bundle_repo:
+        if item_repo is not af_repo.bundle_repo:
             repo_pool.add_repository(
                 item_repo,
                 priority=poetry_repository_pool.Priority.SUPPLEMENTAL,
@@ -361,10 +362,16 @@ class Build(base.Command):
 
                 dep = pkg_map[cycle[-1]]
                 pkg_with_dep = pkg_map[cycle[-2]]
-                assert isinstance(pkg_with_dep, af_python.PythonPackage)
-                if dep.name not in pkg_with_dep.get_cyclic_runtime_deps():
+                if (
+                    isinstance(pkg_with_dep, af_python.PythonPackage)
+                    and dep.name not in pkg_with_dep.get_cyclic_runtime_deps()
+                ):
                     dep, pkg_with_dep = pkg_with_dep, dep
-                    if dep.name not in pkg_with_dep.get_cyclic_runtime_deps():
+                    if (
+                        isinstance(pkg_with_dep, af_python.PythonPackage)
+                        and dep.name
+                        not in pkg_with_dep.get_cyclic_runtime_deps()
+                    ):
                         raise
 
                 last_cycle = current_cycle
