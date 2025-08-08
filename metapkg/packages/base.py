@@ -31,6 +31,7 @@ import shlex
 import sys
 import textwrap
 
+import packaging.version
 import packaging.utils
 
 from poetry.core.packages import dependency as poetry_dep
@@ -61,6 +62,32 @@ all_requires_include_build_reqs: bool = False
 
 
 Args: TypeAlias = dict[str, Union[str, pathlib.Path, None]]
+
+_PEP440_PATTERN = re.sub(
+    r"\?P<\w+>",
+    "",
+    packaging.version.VERSION_PATTERN,
+)
+
+# fmt: off
+_PATCH_FILE_RE = re.compile(
+    r"""^
+    (?P<pkg_name>[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*)
+    __
+    (?P<patch_name>[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*)
+    (?:
+        __
+        (?:
+            (?P<v1>""" + _PEP440_PATTERN + r""")
+            (?:(?P<vrange>-)(?P<v2>""" + _PEP440_PATTERN + r""")?)?
+            |
+            - (?P<v2_open>""" + _PEP440_PATTERN + r""")
+        )
+    )?
+    $""",
+    re.VERBOSE | re.IGNORECASE,
+)
+# fmt: on
 
 
 class AliasPackage(poetry_pkg.Package):
@@ -853,15 +880,29 @@ class BundledPackage(BasePackage):
         modpath = pathlib.Path(sys.modules[self.__module__].__path__[0])
         patches_dir = modpath / "patches"
 
-        patches = collections.defaultdict(list)
-        if patches_dir.exists():
-            for path in patches_dir.glob("*.patch"):
-                with open(path, "r") as f:
-                    pkg, _, rest = path.stem.partition("__")
-                    patches[pkg].append((rest, f.read()))
+        if not patches_dir.exists():
+            return {}
 
-            for pkg, plist in patches.items():
-                plist.sort(key=lambda i: i[0])
+        patches = collections.defaultdict(list)
+        for path in patches_dir.glob("*.patch"):
+            m = _PATCH_FILE_RE.match(path.stem)
+            if not m:
+                raise ValueError(f"malformed patch name: {path.name}")
+
+            pkg: str = m.group("pkg_name")
+            patch_name: str = m.group("patch_name")
+            constraints = []
+            if min_ver_str := m.group("v1"):
+                op = ">=" if m.group("vrange") else "=="
+                constraints.append(f"{op} {min_ver_str}")
+
+            if max_ver_str := (m.group("v2") or m.group("v2_open")):
+                constraints.append(f"< {max_ver_str}")
+
+            if not constraints or poetry_version.parse_constraint(
+                ",".join(constraints)
+            ).allows(self.version):
+                patches[pkg].append((patch_name, path.read_text()))
 
         return patches
 
