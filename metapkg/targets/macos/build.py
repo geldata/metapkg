@@ -230,6 +230,7 @@ class NativePackageBuild(MacOSBuild):
 
         dist_xml = minidom.parse(str(distribution))
         gui_xml = dist_xml.documentElement
+        assert gui_xml is not None
 
         for name in resources:
             res_type = pathlib.Path(name).stem.lower()
@@ -255,9 +256,8 @@ class NativePackageBuild(MacOSBuild):
         title_el.appendChild(title_text)
         gui_xml.appendChild(title_el)
 
-        options = gui_xml.getElementsByTagName("options")
-        if options:
-            options = options[0]
+        if options_els := gui_xml.getElementsByTagName("options"):
+            options = options_els[0]
         else:
             options = dist_xml.createElement("options")
             gui_xml.appendChild(options)
