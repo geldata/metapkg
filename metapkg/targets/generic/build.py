@@ -10,8 +10,6 @@ import shutil
 import subprocess
 import textwrap
 
-import magic
-
 from metapkg import packages
 from metapkg import targets
 from metapkg import tools
@@ -582,7 +580,7 @@ class Build(targets.Build):
                 cwd=src_root,
             )
 
-            mime = magic.from_file(str(src_root / dest), mime=True)
+            mime = self.target.executable_mime_type
 
             installrefs = [
                 f"{an}{fn.suffix}",

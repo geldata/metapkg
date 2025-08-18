@@ -22,8 +22,6 @@ setup(
         "requests~=2.31.0",
         "poetry~=2.1.3",
         "distlib~=0.3.8",
-        'python-magic~=0.4.26; platform_system!="Windows" or (platform_machine!="x86_64" and platform_machine!="AMD64")',
-        'python-magic-bin~=0.4.14; platform_system=="Windows" and (platform_machine=="AMD64" or platform_machine=="x86_64")',
         "wheel>=0.32.3",
         "setuptools>=75.3.1",
         "setuptools-rust>=0.11.4",

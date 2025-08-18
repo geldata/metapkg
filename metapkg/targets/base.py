@@ -111,6 +111,10 @@ class Target:
     def machine_architecture(self) -> str:
         return self.arch
 
+    @property
+    def executable_mime_type(self) -> str:
+        raise NotImplementedError
+
     def is_portable(self) -> bool:
         return False
 
@@ -437,6 +441,10 @@ class LinuxTarget(PosixTarget):
     @property
     def triple(self) -> str:
         return f"{self.arch}-unknown-linux-{self.libc}"
+
+    @property
+    def executable_mime_type(self) -> str:
+        return "application/x-pie-executable"
 
     def get_action(self, name: str, build: Build) -> TargetAction:
         if name == "adduser":

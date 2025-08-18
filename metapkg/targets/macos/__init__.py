@@ -280,6 +280,10 @@ class MacOSTarget(generic.GenericTarget):
         else:
             return "10.12"
 
+    @property
+    def executable_mime_type(self) -> str:
+        return "application/x-mach-binary"
+
     def get_package_repository(self) -> MacOSRepository:
         repo = MacOSRepository("macos")
         repo.register_package_impl("libffi", LibFFISystemPackage)

@@ -22,6 +22,10 @@ class WindowsTarget(generic.GenericTarget):
     def triple(self) -> str:
         return f"{self.arch}-pc-windows-msvc"
 
+    @property
+    def executable_mime_type(self) -> str:
+        return "application/vnd.microsoft.portable-executable"
+
     def get_package_system_ident(
         self,
         build: targets.Build,
